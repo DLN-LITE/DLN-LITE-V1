@@ -8,6 +8,8 @@ import CreateShipment from "./pages/CreateShipment";
 import Analytics from "./pages/Analytics";
 import RiskPredictor from "./pages/RiskPredictor";
 import ImmutabilityDemo from "./pages/ImmutabilityDemo";
+import DisruptionFeed from "./pages/DisruptionFeed";
+import RouteOptimizer from "./pages/RouteOptimizer";
 
 export default function App() {
   return (
@@ -15,13 +17,15 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Layout />}>
           <Route index element={<Navigate to="/dashboard" replace />} />
-          <Route path="dashboard"          element={<Dashboard />} />
-          <Route path="shipments"           element={<ShipmentList />} />
-          <Route path="shipments/new"       element={<CreateShipment />} />
-          <Route path="shipments/:id"       element={<ShipmentDetail />} />
-          <Route path="analytics"           element={<Analytics />} />
-          <Route path="risk-predictor"      element={<RiskPredictor />} />
-          <Route path="immutability-demo"   element={<ImmutabilityDemo />} />
+          <Route path="dashboard" element={<Dashboard />} />
+          <Route path="shipments" element={<ShipmentList />} />
+          <Route path="shipments/new" element={<CreateShipment />} />
+          <Route path="shipments/:id" element={<ShipmentDetail />} />
+          <Route path="analytics" element={<Analytics />} />
+          <Route path="risk-predictor" element={<RiskPredictor />} />
+          <Route path="immutability-demo" element={<ImmutabilityDemo />} />
+          <Route path="disruptions" element={<DisruptionFeed />} />
+          <Route path="route-optimizer" element={<RouteOptimizer />} />
         </Route>
       </Routes>
     </BrowserRouter>
