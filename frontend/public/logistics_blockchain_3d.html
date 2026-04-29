@@ -474,7 +474,7 @@ body{font-family:'Syne',sans-serif;background:var(--navy);color:var(--text);min-
 <div class="chatbot-panel" id="chatbot-panel">
   <div class="chatbot-head">
     <div>
-      <div class="chatbot-title">Grok Logistics Copilot</div>
+      <div class="chatbot-title">Logistics Copilot</div>
       <div class="chatbot-sub" id="chatbot-sub">Ask about shipments, carrier flow, customs, or risk.</div>
     </div>
     <button class="chatbot-close" type="button" onclick="toggleChatbot(false)">✕</button>
@@ -482,7 +482,7 @@ body{font-family:'Syne',sans-serif;background:var(--navy);color:var(--text);min-
   <div class="chatbot-body" id="chatbot-body"></div>
   <div class="chatbot-foot">
     <div class="chatbot-input">
-      <textarea id="chatbot-input" placeholder="Ask Grok about this dashboard..." onkeydown="handleChatbotKey(event)"></textarea>
+      <textarea id="chatbot-input" placeholder="Ask about shipments, delays, risk, or a shipment ID..." onkeydown="handleChatbotKey(event)"></textarea>
       <button class="chatbot-send" id="chatbot-send" type="button" onclick="submitChatbot()">Send</button>
     </div>
     <div class="chatbot-status" id="chatbot-status"></div>
@@ -514,7 +514,7 @@ let chatbotOpen = false;
 let chatbotHistory = [
   {
     role: "assistant",
-    content: "I am your Grok logistics copilot. I can explain shipment status, carrier milestones, customs outcomes, and dashboard data.",
+    content: "I am your logistics copilot. I can explain shipment status, carrier milestones, customs outcomes, and dashboard data using the records available in this system.",
   },
 ];
 
@@ -654,9 +654,13 @@ async function apiRequest(path, options = {}, attempt = 0) {
 
   const request = (async () => {
     try {
+      const mergedHeaders = {
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      };
       const response = await fetch(`${API_BASE}${path}`, {
-        headers: { "Content-Type": "application/json", ...(options.headers || {}) },
         ...options,
+        headers: mergedHeaders,
       });
 
       const payload = await response.json().catch(() => ({}));
@@ -906,7 +910,7 @@ async function submitChatbot() {
   chatbotHistory.push({ role: "user", content: message });
   input.value = "";
   renderChatbotMessages();
-  setChatbotStatus("Grok is thinking...");
+  setChatbotStatus("Checking shipment records...");
   if (send) send.disabled = true;
 
   try {
@@ -931,9 +935,9 @@ async function submitChatbot() {
       }),
     });
     chatbotHistory.push({ role: "assistant", content: response.reply || "I could not generate a response." });
-    setChatbotStatus(`Powered by ${response.model || "Grok"}`);
+    setChatbotStatus(response.source === "local-db" ? "Using MongoDB/local shipment data" : `Powered by ${response.model || "AI"}`);
   } catch (error) {
-    chatbotHistory.push({ role: "assistant", content: `I could not reach Grok right now: ${error.message}` });
+    chatbotHistory.push({ role: "assistant", content: `I could not answer right now: ${error.message}` });
     setChatbotStatus("Chat unavailable");
   } finally {
     if (send) send.disabled = false;

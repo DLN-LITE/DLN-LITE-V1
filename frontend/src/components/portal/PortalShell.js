@@ -43,7 +43,6 @@ const ROLE_META = {
 };
 
 const STORAGE_KEY = "dln-lite-role-session";
-
 export default function PortalShell() {
   const [selectedRole, setSelectedRole] = useState("shipper");
   const [currentRole, setCurrentRole] = useState(null);
