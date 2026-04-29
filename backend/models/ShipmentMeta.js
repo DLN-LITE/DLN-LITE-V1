@@ -33,4 +33,63 @@ const shipmentMetaSchema = new mongoose.Schema(
   }
 );
 
-module.exports = mongoose.model("ShipmentMeta", shipmentMetaSchema);
+const ShipmentMetaModel = mongoose.model("ShipmentMeta", shipmentMetaSchema);
+
+const memoryStore = new Map();
+
+const clone = (value) => JSON.parse(JSON.stringify(value));
+
+const normalizeDoc = (doc) => ({
+  shipmentId: doc.shipmentId,
+  notes: doc.notes || "",
+  documents: doc.documents || [],
+  contactEmail: doc.contactEmail || "",
+  createdBy: doc.createdBy || "unknown",
+  tags: doc.tags || [],
+  latestTemp: doc.latestTemp,
+  latestHumidity: doc.latestHumidity,
+  lastSensorAt: doc.lastSensorAt,
+});
+
+const useMemoryStore = () => global.__DLN_MEMORY_DB__ || mongoose.connection.readyState !== 1;
+
+module.exports = {
+  find(query = {}) {
+    if (!useMemoryStore()) {
+      return ShipmentMetaModel.find(query);
+    }
+
+    const shipmentIds = query.shipmentId?.$in;
+    const docs = Array.from(memoryStore.values()).filter((doc) => {
+      if (Array.isArray(shipmentIds)) {
+        return shipmentIds.includes(doc.shipmentId);
+      }
+      return true;
+    });
+
+    return {
+      lean: async () => clone(docs),
+    };
+  },
+
+  findOne(query = {}) {
+    if (!useMemoryStore()) {
+      return ShipmentMetaModel.findOne(query);
+    }
+
+    const doc = memoryStore.get(query.shipmentId) || null;
+    return {
+      lean: async () => clone(doc),
+    };
+  },
+
+  async create(doc) {
+    if (!useMemoryStore()) {
+      return ShipmentMetaModel.create(doc);
+    }
+
+    const normalized = normalizeDoc(doc);
+    memoryStore.set(normalized.shipmentId, normalized);
+    return clone(normalized);
+  },
+};

@@ -61,6 +61,27 @@ function find(id) {
   return s;
 }
 
+function normalizeIntegrityPayload(value) {
+  if (Array.isArray(value)) {
+    return value.map(normalizeIntegrityPayload);
+  }
+
+  if (value && typeof value === "object") {
+    const normalized = {};
+
+    Object.keys(value)
+      .filter((key) => !["meta", "_id", "__v"].includes(key))
+      .sort()
+      .forEach((key) => {
+        normalized[key] = normalizeIntegrityPayload(value[key]);
+      });
+
+    return normalized;
+  }
+
+  return value;
+}
+
 const STATUS_MAP = { DEPARTED_PORT: "IN_TRANSIT", ARRIVED_PORT: "AT_PORT", CUSTOMS_ENTRY: "IN_CUSTOMS", CUSTOMS_CLEARED: "IN_TRANSIT", DELIVERED: "DELIVERED" };
 
 module.exports = {
@@ -113,7 +134,9 @@ module.exports = {
   async verifyIntegrity(shipmentId, claimedDataJSON) {
     const s = find(shipmentId);
     let claimed; try { claimed = JSON.parse(claimedDataJSON); } catch (e) { throw new Error("Invalid JSON"); }
-    const isMatch = JSON.stringify(claimed) === JSON.stringify(s);
+    const normalizedClaimed = normalizeIntegrityPayload(claimed);
+    const normalizedLedger = normalizeIntegrityPayload(s);
+    const isMatch = JSON.stringify(normalizedClaimed) === JSON.stringify(normalizedLedger);
     return {
       shipmentId, integrityPass: isMatch, verifiedAt: new Date().toISOString(), txId: `tx_verify_${uuidv4().slice(0, 8)}`,
       message: isMatch ? "INTEGRITY VERIFIED — data matches ledger exactly" : "INTEGRITY FAILED — data has been tampered with"

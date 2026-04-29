@@ -115,7 +115,7 @@ export default function DisruptionFeed() {
                         <span style={{ fontSize: 12, color: "#475569" }}>{disruptions.length} events tracked</span>
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: "calc(100vh - 340px)", overflowY: "auto", paddingRight: 4 }}>
-                        {disruptions.map((d, i) => {
+                        {disruptions.map((d) => {
                             const sc = SEVERITY_CONFIG[d.severity];
                             const age = Math.floor((new Date() - d.timestamp) / 60000);
                             return (

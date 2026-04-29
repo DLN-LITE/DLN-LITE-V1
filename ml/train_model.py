@@ -22,6 +22,10 @@ from sklearn.metrics import (
 )
 from xgboost import XGBClassifier
 
+from utils import CARGO_MAP, CARRIERS, DEFAULT_ENCODERS, PORTS
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Step 1: Generate synthetic dataset
 # ─────────────────────────────────────────────────────────────────────────────
@@ -48,15 +52,23 @@ def generate_dataset(n_samples: int = 10000, seed: int = 42) -> pd.DataFrame:
     carrier_delay_rate     = np.random.uniform(0.05, 0.60, n_samples)
     route_avg_delay_days   = np.random.uniform(0, 10, n_samples)
 
-    ports = ["Shanghai", "Rotterdam", "Singapore", "Mumbai", "Los Angeles",
-             "Hamburg", "Felixstowe", "Busan", "Dubai", "Colombo"]
-    carriers = ["OceanFreight Co", "GlobalShip Ltd", "MarineX", "AquaLine", "SeaRoute Express"]
-    cargo_types = [0, 1, 2, 3, 4, 5]  # Electronics, Textiles, Food, Chemicals, Machinery, General
+    cargo_types = list(CARGO_MAP.keys())[:-1]  # Exclude "Other" from synthetic training data.
 
-    origin_port_encoded      = np.random.randint(0, len(ports), n_samples)
-    destination_port_encoded = np.random.randint(0, len(ports), n_samples)
-    carrier_encoded          = np.random.randint(0, len(carriers), n_samples)
-    cargo_type_encoded       = np.random.choice(cargo_types, n_samples)
+    origin_ports      = np.random.choice(PORTS, n_samples)
+    destination_ports = np.random.choice(PORTS, n_samples)
+    carriers          = np.random.choice(CARRIERS, n_samples)
+    cargo_type_names  = np.random.choice(cargo_types, n_samples)
+
+    origin_port_encoded = np.array(
+        [DEFAULT_ENCODERS["origin_port_encoded"][port] for port in origin_ports]
+    )
+    destination_port_encoded = np.array(
+        [DEFAULT_ENCODERS["destination_port_encoded"][port] for port in destination_ports]
+    )
+    carrier_encoded = np.array(
+        [DEFAULT_ENCODERS["carrier_encoded"][carrier] for carrier in carriers]
+    )
+    cargo_type_encoded = np.array([CARGO_MAP[cargo] for cargo in cargo_type_names])
 
     # ── Delay label generation (realistic rules) ──────────────────────────────
     # Base delay probability driven by features
@@ -180,12 +192,15 @@ def train_and_compare(df: pd.DataFrame):
 # Step 3: Save the best model (XGBoost)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def save_model(model, output_path: str = "./models/xgboost_model.pkl"):
+def save_model(
+    model,
+    output_path: str = os.path.join(BASE_DIR, "models", "xgboost_model.pkl"),
+    encoders: dict | None = None,
+):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     # Save model + any encoders needed for inference
-    # (encoders are empty here since we used numeric encoding — extend if needed)
-    joblib.dump({"model": model, "encoders": {}}, output_path)
+    joblib.dump({"model": model, "encoders": encoders or DEFAULT_ENCODERS}, output_path)
     print(f"\n✅ XGBoost model saved to {output_path}")
 
 
@@ -193,7 +208,7 @@ def save_model(model, output_path: str = "./models/xgboost_model.pkl"):
 # Step 4: Save the dataset (for inspection/notebooks)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def save_dataset(df: pd.DataFrame, path: str = "./data/synthetic_shipments.csv"):
+def save_dataset(df: pd.DataFrame, path: str = os.path.join(BASE_DIR, "data", "synthetic_shipments.csv")):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     df.to_csv(path, index=False)
     print(f"✅ Dataset saved to {path}")
@@ -213,7 +228,7 @@ if __name__ == "__main__":
     trained_models, results = train_and_compare(df)
 
     # Save XGBoost as the production model
-    save_model(trained_models["XGBoost"])
+    save_model(trained_models["XGBoost"], encoders=DEFAULT_ENCODERS)
 
     print("\n🎯 Training complete. XGBoost is now the active model.")
     print("   Start the Flask server with: python app.py")

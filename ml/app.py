@@ -10,10 +10,12 @@ from flask_cors import CORS
 from predictor import DelayPredictor
 from utils import encode_features, validate_features
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 app = Flask(__name__)
 CORS(app)
 
-MODEL_PATH = os.getenv("MODEL_PATH", "./models/xgboost_model.pkl")
+MODEL_PATH = os.getenv("MODEL_PATH", os.path.join(BASE_DIR, "models", "xgboost_model.pkl"))
 predictor  = DelayPredictor(MODEL_PATH)
 
 

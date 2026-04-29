@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
-import { getSummary, getRiskDistribution, getTopRoutes } from "../services/api";
+import { getSummary, getRiskDistribution, getTopRoutes, runBatchUpdate } from "../services/api";
 
 export default function Analytics() {
   const [summary, setSummary] = useState(null);
@@ -9,15 +9,26 @@ export default function Analytics() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  const loadAnalytics = async (showLoader = false) => {
+    if (showLoader) setLoading(true);
+    try {
+      setError(null);
+      await runBatchUpdate().catch(() => null);
+      const [s, r, rt] = await Promise.all([getSummary(), getRiskDistribution(), getTopRoutes()]);
+      setSummary(s.data);
+      setRiskDist(r.data);
+      setRoutes(rt.data || []);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      if (showLoader) setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    Promise.all([getSummary(), getRiskDistribution(), getTopRoutes()])
-      .then(([s, r, rt]) => {
-        setSummary(s.data);
-        setRiskDist(r.data);
-        setRoutes(rt.data || []);
-      })
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false));
+    loadAnalytics(true);
+    const interval = setInterval(() => loadAnalytics(false), 5000);
+    return () => clearInterval(interval);
   }, []);
 
   if (loading) return <Center>Loading analytics...</Center>;
@@ -40,6 +51,11 @@ export default function Analytics() {
     <div>
       <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 6 }}>Analytics</h1>
       <p style={{ color: "#64748b", fontSize: 14, marginBottom: 28 }}>Network-wide performance and risk overview</p>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
+        <button onClick={() => loadAnalytics(true)} style={{ background: "#3b82f6", color: "white", border: "none", borderRadius: 8, padding: "8px 12px", cursor: "pointer", fontWeight: 600 }}>
+          Refresh Analytics
+        </button>
+      </div>
 
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 28 }}>
         <KPI label="On-Time Rate" value={`${(((summary.onTimeRate) || 0) * 100).toFixed(1)}%`} color="#22c55e" />

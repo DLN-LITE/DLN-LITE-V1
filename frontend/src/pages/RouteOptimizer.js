@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { predictManual } from "../services/api";
 
 const ROUTE_ALTERNATIVES = {
@@ -24,6 +24,7 @@ const riskColor = s => s >= 0.7 ? "#ef4444" : s >= 0.4 ? "#f59e0b" : "#22c55e";
 const riskLabel = s => s >= 0.7 ? "HIGH" : s >= 0.4 ? "MEDIUM" : "LOW";
 
 export default function RouteOptimizer() {
+    const requestRef = useRef(0);
     const [origin, setOrigin] = useState("Shanghai, CN");
     const [destination, setDestination] = useState("Rotterdam, NL");
     const [cargo, setCargo] = useState("Electronics");
@@ -35,17 +36,17 @@ export default function RouteOptimizer() {
     const PORTS = ["Shanghai, CN", "Mumbai, IN", "Singapore", "Dubai, UAE", "Busan, KR", "Los Angeles, US", "Rotterdam, NL", "Hamburg, DE", "Felixstowe, UK", "Tokyo, JP"];
     const CARGO_TYPES = ["Electronics", "Textiles", "Food", "Chemicals", "Machinery", "General"];
 
-    const runOptimization = async () => {
-        setLoading(true); setResults(null); setSelected(null);
-        const key = `${origin}_${destination}`;
-        const routes = ROUTE_ALTERNATIVES[key] || DEFAULT_ROUTES;
+    const runOptimization = async (params = { origin, destination, cargo, weight }) => {
+        const requestId = ++requestRef.current;
+        setLoading(true);
+        const routes = ROUTE_ALTERNATIVES[`${params.origin}_${params.destination}`] || DEFAULT_ROUTES;
 
         const predictions = await Promise.all(routes.map(async (r, i) => {
             try {
                 const res = await predictManual({
-                    origin_port: origin, destination_port: destination,
-                    carrier: "OceanFreight Co", cargo_type: cargo,
-                    weight_kg: weight, distance_km: r.distance,
+                    origin_port: params.origin, destination_port: params.destination,
+                    carrier: "OceanFreight Co", cargo_type: params.cargo,
+                    weight_kg: params.weight, distance_km: r.distance,
                     num_stops: r.stops, origin_congestion: r.riskFactors.congestion,
                     destination_congestion: 0.4, weather_severity: r.riskFactors.weather,
                     carrier_delay_rate: r.riskFactors.carrierRate, route_avg_delay_days: r.transitDays * 0.1,
@@ -60,11 +61,21 @@ export default function RouteOptimizer() {
             }
         }));
 
+        if (requestId !== requestRef.current) return;
         const best = predictions.reduce((a, b) => a.probability < b.probability ? a : b);
         best.recommended = true;
         setResults(predictions);
+        setSelected(0);
         setLoading(false);
     };
+
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            runOptimization({ origin, destination, cargo, weight });
+        }, 120);
+
+        return () => clearTimeout(timer);
+    }, [origin, destination, cargo, weight]);
 
     const inputStyle = { width: "100%", background: "rgba(0,0,0,0.25)", border: "1px solid rgba(255,255,255,0.08)", color: "#e2e8f0", padding: "11px 14px", borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box" };
     const labelStyle = { fontSize: 12, fontWeight: 600, color: "#94a3b8", display: "block", marginBottom: 7, letterSpacing: "0.5px", textTransform: "uppercase" };
@@ -140,7 +151,7 @@ export default function RouteOptimizer() {
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: 400, background: "linear-gradient(135deg,rgba(255,255,255,0.02),rgba(255,255,255,0.005))", border: "1px dashed rgba(255,255,255,0.1)", borderRadius: 16, color: "#475569" }}>
                             <div style={{ fontSize: 48, marginBottom: 16 }}>🗺️</div>
                             <div style={{ fontSize: 16, color: "#64748b", marginBottom: 8 }}>Set parameters and run optimisation</div>
-                            <div style={{ fontSize: 13, color: "#475569" }}>XGBoost will score all available routes</div>
+                            <div style={{ fontSize: 13, color: "#475569" }}>Results refresh automatically as you change inputs</div>
                         </div>
                     )}
 

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { predictManual } from "../services/api";
 
 const inputStyle = {
@@ -11,6 +11,7 @@ const riskColor = (score) => score >= 0.7 ? "#ef4444" : score >= 0.4 ? "#f59e0b"
 const riskLabel = (score) => score >= 0.7 ? "HIGH RISK" : score >= 0.4 ? "MEDIUM RISK" : "LOW RISK";
 
 export default function RiskPredictor() {
+  const requestRef = useRef(0);
   const [form, setForm] = useState({
     origin_port:            "Shanghai",
     destination_port:       "Rotterdam",
@@ -32,18 +33,29 @@ export default function RiskPredictor() {
 
   const set = (field) => (e) => setForm({ ...form, [field]: e.target.type === "number" ? parseFloat(e.target.value) : e.target.value });
 
-  const handlePredict = async () => {
+  const handlePredict = async (nextForm = form) => {
+    const requestId = ++requestRef.current;
     setLoading(true);
     setError(null);
     try {
-      const res = await predictManual(form);
-      setResult(res.prediction);
+      const res = await predictManual(nextForm);
+      if (requestId !== requestRef.current) return;
+      setResult(res.prediction || null);
     } catch (e) {
+      if (requestId !== requestRef.current) return;
       setError(e.response?.data?.error || e.message);
     } finally {
-      setLoading(false);
+      if (requestId === requestRef.current) setLoading(false);
     }
   };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      handlePredict(form);
+    }, 120);
+
+    return () => clearTimeout(timer);
+  }, [form]);
 
   return (
     <div style={{ maxWidth: 860, margin: "0 auto" }}>
@@ -98,11 +110,11 @@ export default function RiskPredictor() {
           <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 20, color: "#94a3b8" }}>Prediction Result</h2>
 
           {!result ? (
-            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#475569", flexDirection: "column", gap: 12 }}>
-              <div style={{ fontSize: 48 }}>🤖</div>
-              <div>Fill in parameters and click Predict</div>
-            </div>
-          ) : (
+              <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#475569", flexDirection: "column", gap: 12 }}>
+                <div style={{ fontSize: 48 }}>🤖</div>
+                <div>Prediction updates as you change inputs</div>
+              </div>
+            ) : (
             <div>
               {/* Big risk score */}
               <div style={{ textAlign: "center", marginBottom: 28 }}>

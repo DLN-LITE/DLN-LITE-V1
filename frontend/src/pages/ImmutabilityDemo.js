@@ -1,6 +1,5 @@
 import React, { useState } from "react";
-import { getShipment } from "../services/api";
-import api from "../services/api";
+import { getShipment, verifyIntegrity } from "../services/api";
 
 const inputStyle = { width:"100%", background:"#0f172a", border:"1px solid #334155", color:"#e2e8f0", padding:"10px 14px", borderRadius:8, fontSize:14, outline:"none", boxSizing:"border-box" };
 
@@ -32,8 +31,8 @@ export default function ImmutabilityDemo() {
       let claimed;
       try { claimed = JSON.parse(tampered); }
       catch(e) { alert("Invalid JSON — fix the tampered data first"); setLoading(false); return; }
-      const res = await api.post(`/shipments/${shipmentId}/verify`, { claimedData: claimed });
-      setResult(res.data.data);
+      const res = await verifyIntegrity(shipmentId, claimed);
+      setResult(res.data);
       setStep(4);
     } catch(e) { alert("Verify error: " + e.message); }
     finally { setLoading(false); }

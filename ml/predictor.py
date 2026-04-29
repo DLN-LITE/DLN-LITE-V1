@@ -22,9 +22,9 @@ FEATURE_COLUMNS = [
     "month",
     "origin_congestion",
     "destination_congestion",
+    "weather_severity_encoded",   # 0=clear, 1=moderate, 2=storm
     "carrier_delay_rate",
     "route_avg_delay_days",
-    "weather_severity_encoded",   # 0=clear, 1=moderate, 2=storm
     "cargo_type_encoded",
     "origin_port_encoded",
     "destination_port_encoded",

@@ -7,8 +7,8 @@ const connectDB = async () => {
     const conn = await mongoose.connect(process.env.MONGO_URI || "mongodb://localhost:27017/dlnlite");
     logger.info(`✅ MongoDB connected: ${conn.connection.host}`);
   } catch (error) {
-    logger.error(`❌ MongoDB connection error: ${error.message}`);
-    process.exit(1);
+    global.__DLN_MEMORY_DB__ = true;
+    logger.warn(`MongoDB unavailable, falling back to in-memory metadata store: ${error.message}`);
   }
 };
 

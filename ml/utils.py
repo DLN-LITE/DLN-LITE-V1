@@ -14,6 +14,27 @@ REQUIRED_FIELDS = [
     "carrier_delay_rate",
 ]
 
+PORTS = [
+    "Shanghai",
+    "Rotterdam",
+    "Singapore",
+    "Mumbai",
+    "Los Angeles",
+    "Hamburg",
+    "Felixstowe",
+    "Busan",
+    "Dubai",
+    "Colombo",
+]
+
+CARRIERS = [
+    "OceanFreight Co",
+    "GlobalShip Ltd",
+    "MarineX",
+    "AquaLine",
+    "SeaRoute Express",
+]
+
 WEATHER_MAP = {
     "clear":    0,
     "moderate": 1,
@@ -28,6 +49,12 @@ CARGO_MAP = {
     "Machinery":   4,
     "General":     5,
     "Other":       6,
+}
+
+DEFAULT_ENCODERS = {
+    "origin_port_encoded": {name: idx for idx, name in enumerate(PORTS)},
+    "destination_port_encoded": {name: idx for idx, name in enumerate(PORTS)},
+    "carrier_encoded": {name: idx for idx, name in enumerate(CARRIERS)},
 }
 
 
@@ -65,13 +92,15 @@ def encode_features(features: dict, encoders: dict) -> dict:
     encoded["cargo_type_encoded"] = CARGO_MAP.get(cargo_raw, 6)
 
     # Categorical string features — use saved label encoders or hash
+    active_encoders = DEFAULT_ENCODERS | encoders
+
     for col, raw_key in [
         ("origin_port_encoded",      "origin_port"),
         ("destination_port_encoded", "destination_port"),
         ("carrier_encoded",          "carrier"),
     ]:
         raw_val = features.get(raw_key, "unknown")
-        encoder = encoders.get(col)
+        encoder = active_encoders.get(col)
         if encoder and raw_val in encoder:
             encoded[col] = encoder[raw_val]
         else:
