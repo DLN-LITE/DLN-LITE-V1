@@ -4,85 +4,154 @@ import { createShipment } from "../services/api";
 
 const CARGO_TYPES = ["Electronics", "Textiles", "Food", "Chemicals", "Machinery", "General", "Other"];
 const CARRIERS = ["OceanFreight Co", "GlobalShip Ltd", "MarineX", "AquaLine", "SeaRoute Express"];
-const inputStyle = { width: "100%", background: "rgba(0,0,0,0.25)", border: "1px solid rgba(255,255,255,0.08)", color: "#e2e8f0", padding: "11px 14px", borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box", transition: "border-color 0.15s" };
-const labelStyle = { display: "block", fontSize: 12, fontWeight: 600, color: "#94a3b8", marginBottom: 7, letterSpacing: "0.5px", textTransform: "uppercase" };
 
-export default function CreateShipment() {
+export default function CreateShipment({ embedded = false }) {
   const navigate = useNavigate();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
-  const [form, setForm] = useState({ containerId: "", origin: "", destination: "", carrier: CARRIERS[0], cargoType: CARGO_TYPES[0], weightKg: "", estimatedArrival: "", notes: "", contactEmail: "" });
-  const set = f => e => setForm({ ...form, [f]: e.target.value });
+  const [form, setForm] = useState({
+    containerId: "",
+    origin: "",
+    destination: "",
+    carrier: CARRIERS[0],
+    cargoType: CARGO_TYPES[0],
+    weightKg: "",
+    estimatedArrival: "",
+    notes: "",
+    contactEmail: "",
+  });
+
+  const setField = (field) => (event) => setForm((current) => ({ ...current, [field]: event.target.value }));
 
   const handleSubmit = async () => {
-    const missing = ["containerId", "origin", "destination", "carrier", "cargoType", "weightKg", "estimatedArrival"].filter(f => !form[f]);
-    if (missing.length) return setError(`Please fill in: ${missing.join(", ")}`);
-    setSubmitting(true); setError(null);
-    try { const r = await createShipment({ ...form, weightKg: parseFloat(form.weightKg) }); navigate(`/shipments/${r.data.shipmentId}`); }
-    catch (e) { setError(e.response?.data?.error || e.message); } finally { setSubmitting(false); }
+    const missing = ["containerId", "origin", "destination", "carrier", "cargoType", "weightKg", "estimatedArrival"].filter((field) => !form[field]);
+    if (missing.length) {
+      setError(`Please complete: ${missing.join(", ")}`);
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+    try {
+      const response = await createShipment({ ...form, weightKg: parseFloat(form.weightKg) });
+      navigate(`/shipments/${response.data.shipmentId}`);
+    } catch (requestError) {
+      setError(requestError.response?.data?.error || requestError.message);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
-    <div style={{ maxWidth: 700, margin: "0 auto" }}>
-      <button onClick={() => navigate("/shipments")} style={{ background: "transparent", border: "none", color: "#64748b", cursor: "pointer", fontSize: 13, marginBottom: 20, display: "flex", alignItems: "center", gap: 6 }}>
-        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
-        Back
-      </button>
-      <div style={{ marginBottom: 28 }}>
-        <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f8fafc", marginBottom: 6, letterSpacing: "-0.5px" }}>New Shipment</h1>
-        <p style={{ color: "#64748b", fontSize: 14 }}>This record will be written permanently to the Hyperledger Fabric blockchain</p>
-      </div>
-
-      <div style={{ background: "linear-gradient(135deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 20, padding: 32 }}>
-        <Section title="Shipment Identity" color="#3b82f6">
-          <Grid>
-            <F label="Container ID *" placeholder="e.g. CONT-ABC123" value={form.containerId} onChange={set("containerId")} />
-            <F label="Origin Port *" placeholder="e.g. Shanghai, CN" value={form.origin} onChange={set("origin")} />
-            <F label="Destination Port *" placeholder="e.g. Rotterdam, NL" value={form.destination} onChange={set("destination")} />
-            <div><label style={labelStyle}>Carrier *</label><select value={form.carrier} onChange={set("carrier")} style={inputStyle}>{CARRIERS.map(c => <option key={c}>{c}</option>)}</select></div>
-          </Grid>
-        </Section>
-        <Section title="Cargo Details" color="#a78bfa">
-          <Grid>
-            <div><label style={labelStyle}>Cargo Type *</label><select value={form.cargoType} onChange={set("cargoType")} style={inputStyle}>{CARGO_TYPES.map(c => <option key={c}>{c}</option>)}</select></div>
-            <F label="Weight (kg) *" placeholder="e.g. 12500" type="number" value={form.weightKg} onChange={set("weightKg")} />
-          </Grid>
-        </Section>
-        <Section title="Timing" color="#34d399">
-          <F label="Estimated Arrival Date *" type="date" value={form.estimatedArrival} onChange={set("estimatedArrival")} />
-        </Section>
-        <Section title="Optional Info" color="#f59e0b">
-          <Grid>
-            <F label="Contact Email" placeholder="logistics@company.com" type="email" value={form.contactEmail} onChange={set("contactEmail")} />
-            <div><label style={labelStyle}>Notes</label><textarea value={form.notes} onChange={set("notes")} placeholder="Additional notes..." style={{ ...inputStyle, height: 80, resize: "vertical" }} /></div>
-          </Grid>
-        </Section>
-
-        {error && <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", color: "#f87171", padding: "12px 16px", borderRadius: 10, fontSize: 14, marginBottom: 20 }}>{error}</div>}
-
-        <button onClick={handleSubmit} disabled={submitting} style={{ width: "100%", background: submitting ? "rgba(59,130,246,0.3)" : "linear-gradient(135deg,#3b82f6,#8b5cf6)", color: "white", border: "none", padding: 15, borderRadius: 12, cursor: submitting ? "not-allowed" : "pointer", fontWeight: 700, fontSize: 15, boxShadow: "0 4px 20px rgba(59,130,246,0.4)", transition: "all 0.2s" }}>
-          {submitting ? "Writing to Blockchain..." : "Create Shipment on Blockchain →"}
+    <div>
+      {!embedded ? (
+        <button className="cf-muted-link" onClick={() => navigate("/shipments")}>
+          <span aria-hidden="true">←</span>
+          Back to shipments
         </button>
-        <p style={{ textAlign: "center", fontSize: 12, color: "#334155", marginTop: 12 }}>This transaction is immutable once submitted and recorded across all network nodes.</p>
+      ) : null}
+
+      {!embedded ? (
+        <div className="cf-page-head">
+          <div>
+            <p className="cf-page-kicker">Create blockchain record</p>
+            <h1 className="cf-page-title">Register a new shipment handoff.</h1>
+            <p className="cf-page-copy">
+              This form captures the operational metadata that becomes the foundation of the immutable ledger record.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="portal-section-head">
+          <div className="card-header">⊕ Create New Shipment</div>
+          <div className="portal-section-copy">
+            This writes the operational metadata that becomes the foundation of the immutable ledger record.
+          </div>
+        </div>
+      )}
+
+      <div className="cf-grid-2 portal-embedded-grid" style={{ gridTemplateColumns: "minmax(0,1.2fr) minmax(280px,0.8fr)" }}>
+        <section className="cf-card">
+          <div className="cf-card-label">{embedded ? "Shipment details" : "Shipment details"}</div>
+          <div className="cf-form-grid">
+            <Field label="Container ID">
+              <input className="cf-input" value={form.containerId} onChange={setField("containerId")} placeholder="CONT-ABC123" />
+            </Field>
+            <Field label="Carrier">
+              <select className="cf-select" value={form.carrier} onChange={setField("carrier")}>
+                {CARRIERS.map((carrier) => <option key={carrier}>{carrier}</option>)}
+              </select>
+            </Field>
+            <Field label="Origin port">
+              <input className="cf-input" value={form.origin} onChange={setField("origin")} placeholder="Shanghai, CN" />
+            </Field>
+            <Field label="Destination port">
+              <input className="cf-input" value={form.destination} onChange={setField("destination")} placeholder="Rotterdam, NL" />
+            </Field>
+            <Field label="Cargo type">
+              <select className="cf-select" value={form.cargoType} onChange={setField("cargoType")}>
+                {CARGO_TYPES.map((cargoType) => <option key={cargoType}>{cargoType}</option>)}
+              </select>
+            </Field>
+            <Field label="Weight (kg)">
+              <input className="cf-input" type="number" value={form.weightKg} onChange={setField("weightKg")} placeholder="12500" />
+            </Field>
+            <Field label="Estimated arrival">
+              <input className="cf-input" type="date" value={form.estimatedArrival} onChange={setField("estimatedArrival")} />
+            </Field>
+            <Field label="Contact email">
+              <input className="cf-input" type="email" value={form.contactEmail} onChange={setField("contactEmail")} placeholder="ops@company.com" />
+            </Field>
+            <Field label="Notes" full>
+              <textarea className="cf-textarea" value={form.notes} onChange={setField("notes")} placeholder="Special handling notes, internal references, customs remarks..." />
+            </Field>
+          </div>
+
+          {error ? (
+            <div className="cf-card-soft" style={{ marginTop: 16, color: "#ff6674", borderColor: "rgba(255,68,85,0.25)" }}>
+              {error}
+            </div>
+          ) : null}
+
+          <div style={{ display: "flex", gap: 12, marginTop: 18, flexWrap: "wrap" }}>
+            <button className="cf-primary-btn" onClick={handleSubmit} disabled={submitting}>
+              {submitting ? "Writing to blockchain..." : "Create shipment"}
+            </button>
+            {!embedded ? (
+              <button className="cf-secondary-btn" onClick={() => navigate("/shipments")}>
+                Cancel
+              </button>
+            ) : null}
+          </div>
+        </section>
+
+        <aside className="cf-card">
+          <div className="cf-card-label">What this writes</div>
+          <div className="cf-timeline">
+            <div className="cf-timeline-item">
+              <div className="cf-timeline-title">Foundational ledger record</div>
+              <div className="cf-timeline-copy">Creates the shipment identity, route and custody baseline shared across participants.</div>
+            </div>
+            <div className="cf-timeline-item">
+              <div className="cf-timeline-title">ML-ready metadata</div>
+              <div className="cf-timeline-copy">Feeds the downstream delay prediction and monitoring views with route context.</div>
+            </div>
+            <div className="cf-timeline-item">
+              <div className="cf-timeline-title">Immutable transaction trail</div>
+              <div className="cf-timeline-copy">Once submitted, the resulting record becomes the reference point for all later events and verification checks.</div>
+            </div>
+          </div>
+        </aside>
       </div>
     </div>
   );
 }
 
-function Section({ title, color, children }) {
+function Field({ label, children, full = false }) {
   return (
-    <div style={{ marginBottom: 28 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, paddingBottom: 10, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-        <div style={{ width: 4, height: 16, borderRadius: 2, background: color }} />
-        <span style={{ fontSize: 13, fontWeight: 600, color: "#94a3b8", letterSpacing: "0.5px", textTransform: "uppercase" }}>{title}</span>
-      </div>
+    <div className="cf-field" style={full ? { gridColumn: "1 / -1" } : undefined}>
+      <label>{label}</label>
       {children}
     </div>
   );
-}
-function Grid({ children }) { return <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>{children}</div>; }
-function F({ label, placeholder, type = "text", value, onChange }) {
-  const labelStyle2 = { display: "block", fontSize: 12, fontWeight: 600, color: "#94a3b8", marginBottom: 7, letterSpacing: "0.5px", textTransform: "uppercase" };
-  const inputStyle2 = { width: "100%", background: "rgba(0,0,0,0.25)", border: "1px solid rgba(255,255,255,0.08)", color: "#e2e8f0", padding: "11px 14px", borderRadius: 10, fontSize: 14, outline: "none", boxSizing: "border-box" };
-  return <div><label style={labelStyle2}>{label}</label><input type={type} placeholder={placeholder} value={value} onChange={onChange} style={inputStyle2} /></div>;
 }

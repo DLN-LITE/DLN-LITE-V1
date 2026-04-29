@@ -1,6 +1,7 @@
 import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Layout from "./components/Layout";
+import ExactPortalFrame from "./components/ExactPortalFrame";
 import Dashboard from "./pages/Dashboard";
 import ShipmentList from "./pages/ShipmentList";
 import ShipmentDetail from "./pages/ShipmentDetail";
@@ -15,8 +16,8 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/" element={<ExactPortalFrame />} />
         <Route path="/" element={<Layout />}>
-          <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="shipments" element={<ShipmentList />} />
           <Route path="shipments/new" element={<CreateShipment />} />
@@ -27,6 +28,7 @@ export default function App() {
           <Route path="disruptions" element={<DisruptionFeed />} />
           <Route path="route-optimizer" element={<RouteOptimizer />} />
         </Route>
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
   );

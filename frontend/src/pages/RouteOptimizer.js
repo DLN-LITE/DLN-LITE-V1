@@ -23,7 +23,7 @@ const WEATHER_COLOR = { clear: "#22c55e", moderate: "#f59e0b", storm: "#ef4444" 
 const riskColor = s => s >= 0.7 ? "#ef4444" : s >= 0.4 ? "#f59e0b" : "#22c55e";
 const riskLabel = s => s >= 0.7 ? "HIGH" : s >= 0.4 ? "MEDIUM" : "LOW";
 
-export default function RouteOptimizer() {
+export default function RouteOptimizer({ embedded = false }) {
     const requestRef = useRef(0);
     const [origin, setOrigin] = useState("Shanghai, CN");
     const [destination, setDestination] = useState("Rotterdam, NL");
@@ -83,8 +83,19 @@ export default function RouteOptimizer() {
     return (
         <div>
             <div style={{ marginBottom: 28 }}>
-                <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f8fafc", letterSpacing: "-0.5px", marginBottom: 6 }}>Route Optimizer</h1>
-                <p style={{ color: "#64748b", fontSize: 14 }}>Compare shipping routes using XGBoost ML predictions to minimise delay risk and cost</p>
+                {embedded ? (
+                    <div className="portal-feature-head">
+                        <div>
+                            <div className="card-header">🗺 Route Optimizer</div>
+                            <div className="portal-section-copy">Compare shipping routes using ML predictions to minimise delay risk and cost.</div>
+                        </div>
+                    </div>
+                ) : (
+                    <>
+                        <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f8fafc", letterSpacing: "-0.5px", marginBottom: 6 }}>Route Optimizer</h1>
+                        <p style={{ color: "#64748b", fontSize: 14 }}>Compare shipping routes using XGBoost ML predictions to minimise delay risk and cost</p>
+                    </>
+                )}
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", gap: 24 }}>

@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
-import { getSummary, getRiskDistribution, getTopRoutes, runBatchUpdate } from "../services/api";
+import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { getRiskDistribution, getSummary, getTopRoutes, runBatchUpdate } from "../services/api";
 
-export default function Analytics() {
+export default function Analytics({ embedded = false }) {
   const [summary, setSummary] = useState(null);
   const [riskDist, setRiskDist] = useState(null);
   const [routes, setRoutes] = useState([]);
@@ -14,12 +14,12 @@ export default function Analytics() {
     try {
       setError(null);
       await runBatchUpdate().catch(() => null);
-      const [s, r, rt] = await Promise.all([getSummary(), getRiskDistribution(), getTopRoutes()]);
-      setSummary(s.data);
-      setRiskDist(r.data);
-      setRoutes(rt.data || []);
-    } catch (e) {
-      setError(e.message);
+      const [summaryRes, riskRes, routeRes] = await Promise.all([getSummary(), getRiskDistribution(), getTopRoutes()]);
+      setSummary(summaryRes.data);
+      setRiskDist(riskRes.data);
+      setRoutes(routeRes.data || []);
+    } catch (requestError) {
+      setError(requestError.message);
     } finally {
       if (showLoader) setLoading(false);
     }
@@ -31,98 +31,132 @@ export default function Analytics() {
     return () => clearInterval(interval);
   }, []);
 
-  if (loading) return <Center>Loading analytics...</Center>;
-  if (error || !summary || !riskDist) return <Center style={{ color: "#ef4444" }}>Backend error — check backend terminal is running</Center>;
+  if (loading) {
+    return (
+      <div className="cf-page-shell">
+        <p className="cf-microcopy">Telemetry aggregation</p>
+        <h1>Refreshing analytics...</h1>
+      </div>
+    );
+  }
+
+  if (error || !summary || !riskDist) {
+    return (
+      <div className="cf-page-shell">
+        <h1>Analytics unavailable</h1>
+        <p className="cf-page-copy">The backend could not provide analytics data just now.</p>
+      </div>
+    );
+  }
 
   const statusData = [
-    { name: "In Transit", value: summary.inTransit || 0, color: "#3b82f6" },
-    { name: "Delivered", value: summary.delivered || 0, color: "#22c55e" },
-    { name: "Delayed", value: summary.delayed || 0, color: "#ef4444" },
-    { name: "Other", value: Math.max(0, (summary.total || 0) - (summary.inTransit || 0) - (summary.delivered || 0) - (summary.delayed || 0)), color: "#64748b" },
-  ].filter(d => d.value > 0);
+    { name: "In Transit", value: summary.inTransit || 0, color: "#2080ff" },
+    { name: "Delivered", value: summary.delivered || 0, color: "#00e676" },
+    { name: "Delayed", value: summary.delayed || 0, color: "#ff6674" },
+    { name: "Other", value: Math.max(0, (summary.total || 0) - (summary.inTransit || 0) - (summary.delivered || 0) - (summary.delayed || 0)), color: "#8b98b5" },
+  ].filter((item) => item.value > 0);
 
   const riskData = [
-    { name: "Low (<40%)", value: riskDist.low || 0, fill: "#22c55e" },
-    { name: "Medium (40-70%)", value: riskDist.medium || 0, fill: "#f59e0b" },
-    { name: "High (≥70%)", value: riskDist.high || 0, fill: "#ef4444" },
+    { name: "Low", value: riskDist.low || 0, fill: "#00e676" },
+    { name: "Medium", value: riskDist.medium || 0, fill: "#f5a623" },
+    { name: "High", value: riskDist.high || 0, fill: "#ff6674" },
   ];
 
   return (
     <div>
-      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 6 }}>Analytics</h1>
-      <p style={{ color: "#64748b", fontSize: 14, marginBottom: 28 }}>Network-wide performance and risk overview</p>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
-        <button onClick={() => loadAnalytics(true)} style={{ background: "#3b82f6", color: "white", border: "none", borderRadius: 8, padding: "8px 12px", cursor: "pointer", fontWeight: 600 }}>
-          Refresh Analytics
-        </button>
-      </div>
+      {!embedded ? (
+        <div className="cf-page-head">
+          <div>
+            <p className="cf-page-kicker">Network analytics</p>
+            <h1 className="cf-page-title">See performance, congestion and risk in one layer.</h1>
+            <p className="cf-page-copy">Live operational charts refresh against the current ledger and prediction services.</p>
+          </div>
+          <button className="cf-primary-btn" onClick={() => loadAnalytics(true)}>
+            Refresh analytics
+          </button>
+        </div>
+      ) : (
+        <div className="portal-feature-head">
+          <div>
+            <div className="card-header">📊 Analyst View</div>
+            <div className="portal-section-copy">Live operational charts refresh against the current ledger and prediction services.</div>
+          </div>
+          <button className="cf-primary-btn portal-inline-button" onClick={() => loadAnalytics(true)}>
+            Refresh analytics
+          </button>
+        </div>
+      )}
 
-      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 28 }}>
-        <KPI label="On-Time Rate" value={`${(((summary.onTimeRate) || 0) * 100).toFixed(1)}%`} color="#22c55e" />
-        <KPI label="Avg Risk Score" value={`${(((summary.avgRiskScore) || 0) * 100).toFixed(1)}%`} color="#f59e0b" />
-        <KPI label="Total Shipments" value={summary.total || 0} color="#3b82f6" />
-        <KPI label="High Risk Now" value={summary.highRisk || 0} color="#ef4444" />
-      </div>
+      <section className="cf-grid-3" style={{ marginBottom: 18 }}>
+        <Kpi label="On-time rate" value={`${(((summary.onTimeRate) || 0) * 100).toFixed(1)}%`} color="#00e676" />
+        <Kpi label="Average risk" value={`${(((summary.avgRiskScore) || 0) * 100).toFixed(1)}%`} color="#f5a623" />
+        <Kpi label="High risk now" value={summary.highRisk || 0} color="#ff6674" />
+      </section>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
-        <ChartCard title="Shipment Status Distribution">
-          {statusData.length === 0
-            ? <div style={{ padding: 40, textAlign: "center", color: "#64748b" }}>No data yet — add shipments first</div>
-            : <ResponsiveContainer width="100%" height={220}>
+      <section className="cf-grid-2" style={{ marginBottom: 18 }}>
+        <ChartCard title="Shipment status distribution">
+          {statusData.length === 0 ? (
+            <div className="cf-empty">No shipment data yet.</div>
+          ) : (
+            <ResponsiveContainer width="100%" height={260}>
               <PieChart>
-                <Pie data={statusData} cx="50%" cy="50%" outerRadius={80} dataKey="value"
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false} fontSize={11}>
-                  {statusData.map((e, i) => <Cell key={i} fill={e.color} />)}
+                <Pie data={statusData} cx="50%" cy="50%" outerRadius={88} dataKey="value" labelLine={false}>
+                  {statusData.map((entry) => <Cell key={entry.name} fill={entry.color} />)}
                 </Pie>
-                <Tooltip contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 8, color: "#e2e8f0" }} />
+                <Tooltip contentStyle={{ background: "#0c1530", border: "1px solid rgba(100,160,255,0.2)", borderRadius: 12 }} />
               </PieChart>
             </ResponsiveContainer>
-          }
+          )}
         </ChartCard>
 
-        <ChartCard title="ML Risk Distribution">
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={riskData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-              <XAxis dataKey="name" tick={{ fill: "#64748b", fontSize: 11 }} />
-              <YAxis tick={{ fill: "#64748b", fontSize: 11 }} />
-              <Tooltip contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 8, color: "#e2e8f0" }} />
-              <Bar dataKey="value" radius={[6, 6, 0, 0]}>
-                {riskData.map((e, i) => <Cell key={i} fill={e.fill} />)}
+        <ChartCard title="ML risk distribution">
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={riskData} margin={{ top: 12, right: 12, left: -20, bottom: 0 }}>
+              <XAxis dataKey="name" tick={{ fill: "#8b98b5", fontSize: 12 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: "#8b98b5", fontSize: 12 }} axisLine={false} tickLine={false} />
+              <Tooltip contentStyle={{ background: "#0c1530", border: "1px solid rgba(100,160,255,0.2)", borderRadius: 12 }} />
+              <Bar dataKey="value" radius={[8, 8, 0, 0]}>
+                {riskData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
               </Bar>
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
-      </div>
+      </section>
 
-      <ChartCard title="Top Shipping Routes">
-        {routes.length === 0
-          ? <div style={{ padding: 20, textAlign: "center", color: "#64748b" }}>No route data yet</div>
-          : <ResponsiveContainer width="100%" height={Math.max(200, routes.length * 40)}>
-            <BarChart data={routes} layout="vertical" margin={{ top: 0, right: 20, left: 0, bottom: 0 }}>
-              <XAxis type="number" tick={{ fill: "#64748b", fontSize: 12 }} />
-              <YAxis type="category" dataKey="route" width={220} tick={{ fill: "#94a3b8", fontSize: 12 }} />
-              <Tooltip contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 8, color: "#e2e8f0" }} />
-              <Bar dataKey="count" fill="#3b82f6" radius={[0, 6, 6, 0]} />
+      <ChartCard title="Top shipping routes">
+        {routes.length === 0 ? (
+          <div className="cf-empty">No route data yet.</div>
+        ) : (
+          <ResponsiveContainer width="100%" height={Math.max(240, routes.length * 48)}>
+            <BarChart data={routes} layout="vertical" margin={{ top: 10, right: 18, left: 0, bottom: 0 }}>
+              <XAxis type="number" tick={{ fill: "#8b98b5", fontSize: 12 }} axisLine={false} tickLine={false} />
+              <YAxis type="category" dataKey="route" width={220} tick={{ fill: "#e8edf5", fontSize: 12 }} axisLine={false} tickLine={false} />
+              <Tooltip contentStyle={{ background: "#0c1530", border: "1px solid rgba(100,160,255,0.2)", borderRadius: 12 }} />
+              <Bar dataKey="count" fill="#00d4ff" radius={[0, 8, 8, 0]} />
             </BarChart>
           </ResponsiveContainer>
-        }
+        )}
       </ChartCard>
     </div>
   );
 }
 
-function KPI({ label, value, color }) {
-  return <div style={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 12, padding: "16px 24px", flex: 1, minWidth: 140 }}>
-    <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>{label}</div>
-    <div style={{ fontSize: 28, fontWeight: 700, color }}>{value}</div>
-  </div>;
+function Kpi({ label, value, color }) {
+  return (
+    <div className="cf-kpi">
+      <div className="cf-kpi-label">{label}</div>
+      <div className="cf-kpi-value" style={{ color }}>{value}</div>
+    </div>
+  );
 }
+
 function ChartCard({ title, children }) {
-  return <div style={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 12, overflow: "hidden" }}>
-    <div style={{ padding: "14px 20px", borderBottom: "1px solid #334155", fontSize: 14, fontWeight: 600, color: "#94a3b8" }}>{title}</div>
-    <div style={{ padding: "16px 8px" }}>{children}</div>
-  </div>;
-}
-function Center({ children }) {
-  return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "50vh", color: "#64748b" }}>{children}</div>;
+  return (
+    <section className="cf-card">
+      <div className="cf-card-header">
+        <h2 className="cf-card-title">{title}</h2>
+      </div>
+      {children}
+    </section>
+  );
 }

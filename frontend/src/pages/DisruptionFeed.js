@@ -33,7 +33,7 @@ function generateDisruption(id) {
     };
 }
 
-export default function DisruptionFeed() {
+export default function DisruptionFeed({ embedded = false }) {
     const [disruptions, setDisruptions] = useState(() => Array.from({ length: 6 }, (_, i) => generateDisruption(i)));
     const [shipments, setShipments] = useState([]);
     const [paused, setPaused] = useState(false);
@@ -80,7 +80,11 @@ export default function DisruptionFeed() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 28 }}>
                 <div>
                     <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
-                        <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f8fafc", letterSpacing: "-0.5px", margin: 0 }}>Live Disruption Feed</h1>
+                        {embedded ? (
+                            <div className="card-header">🌪 Disruption Feed</div>
+                        ) : (
+                            <h1 style={{ fontSize: 26, fontWeight: 700, color: "#f8fafc", letterSpacing: "-0.5px", margin: 0 }}>Live Disruption Feed</h1>
+                        )}
                         {!paused && <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.25)", borderRadius: 20, padding: "4px 12px" }}>
                             <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#ef4444", animation: "pulse 1.5s infinite" }} />
                             <span style={{ fontSize: 12, color: "#f87171", fontWeight: 600 }}>LIVE</span>
