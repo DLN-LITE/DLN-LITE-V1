@@ -1,10 +1,15 @@
 import React from "react";
 
 export default function ExactPortalFrame() {
+  const configuredApiBase = (process.env.REACT_APP_API_URL || "").trim();
+  const iframeSrc = configuredApiBase
+    ? `/logistics_blockchain_3d.html?apiBase=${encodeURIComponent(configuredApiBase)}`
+    : "/logistics_blockchain_3d.html";
+
   return (
     <iframe
       title="Exact Logistics Portal"
-      src="/logistics_blockchain_3d.html"
+      src={iframeSrc}
       style={{
         width: "100%",
         height: "100vh",
