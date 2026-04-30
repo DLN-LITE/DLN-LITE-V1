@@ -23,6 +23,44 @@ const chatRoutes = require("./routes/chatRoutes");
 const app = express();
 const PORT = process.env.PORT || 4000;
 const FRONTEND_URL = (process.env.FRONTEND_URL || "").replace(/\/+$/, "");
+const DEFAULT_LOCAL_ORIGINS = [
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "http://localhost:3001",
+  "http://127.0.0.1:3001",
+  "null",
+];
+
+function normalizeOrigin(origin = "") {
+  return String(origin || "").trim().replace(/\/+$/, "");
+}
+
+function isAllowedOrigin(origin) {
+  if (!origin) {
+    return true;
+  }
+
+  const normalizedOrigin = normalizeOrigin(origin);
+  const configuredOrigins = [
+    FRONTEND_URL,
+    process.env.CORS_ALLOWED_ORIGINS,
+  ]
+    .flatMap((value) => String(value || "").split(","))
+    .map(normalizeOrigin)
+    .filter(Boolean);
+
+  const allowedOrigins = new Set([...DEFAULT_LOCAL_ORIGINS, ...configuredOrigins]);
+  if (allowedOrigins.has(normalizedOrigin)) {
+    return true;
+  }
+
+  // Render preview/static URLs can change, so allow secure onrender.com origins in production.
+  if (process.env.NODE_ENV === "production" && /^https:\/\/[a-z0-9-]+\.onrender\.com$/i.test(normalizedOrigin)) {
+    return true;
+  }
+
+  return false;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Connect to MongoDB (off-chain bulk data)
@@ -33,22 +71,15 @@ connectDB();
 // Middleware
 // ─────────────────────────────────────────────────────────────────────────────
 app.use(helmet());
-const allowedOrigins = new Set([
-  process.env.FRONTEND_URL || "http://localhost:3000",
-  "http://localhost:3000",
-  "http://127.0.0.1:3000",
-  "http://localhost:3001",
-  "http://127.0.0.1:3001",
-  "null",
-]);
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedOrigins.has(origin)) {
+    if (isAllowedOrigin(origin)) {
       callback(null, true);
       return;
     }
     callback(new Error(`Origin ${origin} not allowed by CORS`));
   },
+  optionsSuccessStatus: 204,
 }));
 app.use(express.json({ limit: "10mb" }));
 app.use(morgan("combined", { stream: { write: (msg) => logger.info(msg.trim()) } }));
