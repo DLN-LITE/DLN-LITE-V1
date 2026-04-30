@@ -10,7 +10,7 @@ const helmet = require("helmet");
 const morgan = require("morgan");
 const rateLimit = require("express-rate-limit");
 
-const connectDB = require("./utils/db");
+const { connectDB } = require("./utils/db");
 const logger = require("./utils/logger");
 
 const shipmentRoutes = require("./routes/shipmentRoutes");
