@@ -2,8 +2,13 @@ import React from "react";
 
 export default function ExactPortalFrame() {
   const configuredApiBase = (process.env.REACT_APP_API_URL || "").trim();
+  const normalizedApiBase = configuredApiBase
+    ? (configuredApiBase.endsWith("/api")
+        ? configuredApiBase
+        : `${configuredApiBase.replace(/\/+$/, "")}/api`)
+    : "";
   const iframeSrc = configuredApiBase
-    ? `/logistics_blockchain_3d.html?apiBase=${encodeURIComponent(configuredApiBase)}`
+    ? `/logistics_blockchain_3d.html?apiBase=${encodeURIComponent(normalizedApiBase)}`
     : "/logistics_blockchain_3d.html";
 
   return (
