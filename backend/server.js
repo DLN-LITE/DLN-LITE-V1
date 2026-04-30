@@ -22,6 +22,7 @@ const chatRoutes = require("./routes/chatRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
+const FRONTEND_URL = (process.env.FRONTEND_URL || "").replace(/\/+$/, "");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Connect to MongoDB (off-chain bulk data)
@@ -64,9 +65,17 @@ app.use("/api/", limiter);
 // Routes
 // ─────────────────────────────────────────────────────────────────────────────
 app.get("/", (req, res) => {
+  const acceptsHtml = req.accepts(["html", "json"]) === "html";
+
+  if (FRONTEND_URL && acceptsHtml) {
+    res.redirect(302, FRONTEND_URL);
+    return;
+  }
+
   res.status(200).json({
     service: "Cargo Intel API",
     status: "ok",
+    frontend: FRONTEND_URL || null,
     docs: {
       health: "/api/health",
       shipments: "/api/shipments",
