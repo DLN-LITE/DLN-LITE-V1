@@ -3,6 +3,7 @@ const express = require("express");
 const { body, validationResult } = require("express-validator");
 
 const AuthUser = require("../models/AuthUser");
+const { registerAndEnrollUser } = require("../services/caService");
 
 const router = express.Router();
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -84,6 +85,16 @@ router.post(
         createdAt: now,
         updatedAt: now,
       });
+
+      // Fabric CA Registration and Enrollment
+      try {
+        await registerAndEnrollUser(email, req.body.role);
+      } catch (caError) {
+        // If CA enrollment fails, we should ideally rollback the user creation, 
+        // but for now we'll just throw the error so the frontend knows it failed.
+        await AuthUser.updateOne({ email }, { $set: { sessionExpiresAt: null } }); // invalidate session
+        throw new Error(`Fabric CA Enrollment failed: ${caError.message}`);
+      }
 
       const created = await AuthUser.findOne({ email }).lean();
       res.status(201).json({

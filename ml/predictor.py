@@ -49,9 +49,9 @@ class DelayPredictor:
             saved = joblib.load(model_path)
             self.model    = saved["model"]
             self.encoders = saved.get("encoders", {})
-            print(f"✅ Model loaded from {model_path}")
+            print(f"[OK] Model loaded from {model_path}")
         else:
-            print(f"⚠️  Model not found at {model_path}. Run train_model.py first.")
+            print(f"[WARN] Model not found at {model_path}. Run train_model.py first.")
 
     # ─────────────────────────────────────────────────────────────────────────
     # predict_single

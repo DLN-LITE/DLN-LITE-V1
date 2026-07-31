@@ -37,7 +37,7 @@ type Shipment struct {
 	WeightKg       float64         `json:"weightKg"`
 	CreatedAt      string          `json:"createdAt"`
 	EstimatedArrival string        `json:"estimatedArrival"`
-	ActualArrival  string          `json:"actualArrival,omitempty"`
+	ActualArrival  string          `json:"actualArrival,omitempty" metadata:",optional"`
 	DelayRiskScore float64         `json:"delayRiskScore"` // updated by ML service
 }
 
@@ -171,6 +171,12 @@ func (s *SmartContract) CreateShipment(
 		return nil, fmt.Errorf("shipment %s already exists", shipmentID)
 	}
 
+	// RBAC Check: Only a shipper can create a shipment
+	err = ctx.GetClientIdentity().AssertAttributeValue("role", "shipper")
+	if err != nil {
+		return nil, fmt.Errorf("access denied: only users with the 'shipper' role can create shipments")
+	}
+
 	// Get the calling org's identity
 	clientOrg, err := ctx.GetClientIdentity().GetMSPID()
 	if err != nil {
@@ -276,6 +282,12 @@ func (s *SmartContract) TransferCustody(
 	shipment, err := s.getShipment(ctx, shipmentID)
 	if err != nil {
 		return nil, err
+	}
+
+	// RBAC Check: Only a carrier can transfer custody
+	err = ctx.GetClientIdentity().AssertAttributeValue("role", "carrier")
+	if err != nil {
+		return nil, fmt.Errorf("access denied: only users with the 'carrier' role can transfer custody")
 	}
 
 	clientOrg, err := ctx.GetClientIdentity().GetMSPID()
@@ -490,59 +502,7 @@ func (s *SmartContract) deriveStatus(eventType string, current ShipmentStatus) S
 	}
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Main
-// ─────────────────────────────────────────────────────────────────────────────
 
-func main() {
-	chaincode, err := contractapi.NewChaincode(&SmartContract{})
-	if err != nil {
-		fmt.Printf("Error creating DLN chaincode: %v\n", err)
-		return
-	}
-
-	if err := chaincode.Start(); err != nil {
-		fmt.Printf("Error starting DLN chaincode: %v\n", err)
-	}
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// UpdateStatus — directly sets shipment status (for endorsement policy demo)
-// Requires MAJORITY endorsement (2 of 3 orgs) to commit
-// ─────────────────────────────────────────────────────────────────────────────
-
-func (s *SmartContract) UpdateStatus(
-	ctx contractapi.TransactionContextInterface,
-	shipmentID string,
-	newStatus string,
-	reason string,
-) (*Shipment, error) {
-
-	shipment, err := s.getShipment(ctx, shipmentID)
-	if err != nil {
-		return nil, err
-	}
-
-	validStatuses := map[string]ShipmentStatus{
-		"CREATED":   StatusCreated,
-		"IN_TRANSIT": StatusInTransit,
-		"AT_PORT":   StatusAtPort,
-		"IN_CUSTOMS": StatusInCustoms,
-		"DELIVERED": StatusDelivered,
-		"DELAYED":   StatusDelayed,
-	}
-
-	status, ok := validStatuses[newStatus]
-	if !ok {
-		return nil, fmt.Errorf("invalid status: %s", newStatus)
-	}
-
-	clientOrg, _ := ctx.GetClientIdentity().GetMSPID()
-	oldStatus := string(shipment.Status)
-	shipment.Status = status
-
-
-// ─────────────────────────────────────────────────────────────────────────────
 // UpdateStatus — directly sets shipment status (requires MAJORITY endorsement)
 // ─────────────────────────────────────────────────────────────────────────────
 

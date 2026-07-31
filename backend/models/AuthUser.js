@@ -10,6 +10,11 @@ const authUserSchema = new mongoose.Schema(
     sessionTokenHash: { type: String, default: null },
     sessionExpiresAt: { type: Date, default: null },
     lastLoginAt: { type: Date, default: null },
+    fabricIdentity: {
+      mspId: { type: String, default: null },
+      certificate: { type: String, default: null },
+      encryptedPrivateKey: { type: String, default: null },
+    }
   },
   {
     timestamps: true,
@@ -32,6 +37,7 @@ const normalizeDoc = (doc) => ({
   sessionTokenHash: doc.sessionTokenHash || null,
   sessionExpiresAt: doc.sessionExpiresAt || null,
   lastLoginAt: doc.lastLoginAt || null,
+  fabricIdentity: doc.fabricIdentity || null,
   createdAt: doc.createdAt || new Date().toISOString(),
   updatedAt: doc.updatedAt || new Date().toISOString(),
 });

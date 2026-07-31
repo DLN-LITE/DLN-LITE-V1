@@ -1,84 +1,104 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # app.py — DLN-Lite ML Service Entry Point
-# Flask REST API serving XGBoost delay predictions.
+# FastAPI REST API serving XGBoost delay predictions.
 # ─────────────────────────────────────────────────────────────────────────────
 
 import os
-from flask import Flask, request, jsonify
-from flask_cors import CORS
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+from typing import List, Dict, Any
 
 from predictor import DelayPredictor
-from utils import encode_features, validate_features
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-app = Flask(__name__)
-CORS(app)
+app = FastAPI(title="DLN-Lite ML Service")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 MODEL_PATH = os.getenv("MODEL_PATH", os.path.join(BASE_DIR, "models", "xgboost_model.pkl"))
 predictor  = DelayPredictor(MODEL_PATH)
+
+
+class ShipmentFeatures(BaseModel):
+    origin_port: str
+    destination_port: str
+    carrier: str
+    distance_km: float = Field(default=8000.0)
+    origin_congestion: float = Field(default=0.5)
+    destination_congestion: float = Field(default=0.5)
+    weather_severity: str = Field(default="clear")
+    carrier_delay_rate: float = Field(default=0.2)
+    num_stops: int = Field(default=1)
+    weight_kg: float = Field(default=5000.0)
+    month: int = Field(default=1)
+    route_avg_delay_days: float = Field(default=2.0)
+    cargo_type: str = Field(default="General")
+
+
+class BatchPredictionRequest(BaseModel):
+    shipments: List[ShipmentFeatures]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # POST /predict — single shipment prediction
 # ─────────────────────────────────────────────────────────────────────────────
 
-@app.route("/predict", methods=["POST"])
-def predict():
-    data = request.get_json()
-    if not data:
-        return jsonify({"error": "No input data"}), 400
-
-    missing = validate_features(data)
-    if missing:
-        return jsonify({"error": f"Missing fields: {missing}"}), 400
-
+@app.post("/predict")
+async def predict(data: ShipmentFeatures):
     try:
-        result = predictor.predict_single(data)
-        return jsonify(result)
+        # Convert pydantic model to dict, matching what predictor expects
+        result = predictor.predict_single(data.model_dump())
+        return result
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # POST /batch-predict — multiple shipments at once
 # ─────────────────────────────────────────────────────────────────────────────
 
-@app.route("/batch-predict", methods=["POST"])
-def batch_predict():
-    data      = request.get_json()
-    shipments = data.get("shipments", [])
-    if not shipments:
-        return jsonify({"error": "No shipments provided"}), 400
-
+@app.post("/batch-predict")
+async def batch_predict(request: BatchPredictionRequest):
+    if not request.shipments:
+        raise HTTPException(status_code=400, detail="No shipments provided")
+    
     try:
-        predictions = predictor.predict_batch(shipments)
-        return jsonify({"predictions": predictions})
+        data = [s.model_dump() for s in request.shipments]
+        predictions = predictor.predict_batch(data)
+        return {"predictions": predictions}
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # GET /health
 # ─────────────────────────────────────────────────────────────────────────────
 
-@app.route("/health", methods=["GET"])
-def health():
-    return jsonify({
+@app.get("/health")
+async def health():
+    return {
         "status":       "ok",
         "model_loaded": predictor.model is not None,
         "model_path":   MODEL_PATH,
-    })
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # GET /model-info — returns feature importances (useful for dashboard)
 # ─────────────────────────────────────────────────────────────────────────────
 
-@app.route("/model-info", methods=["GET"])
-def model_info():
+@app.get("/model-info")
+async def model_info():
     if predictor.model is None:
-        return jsonify({"error": "Model not loaded"}), 503
+        raise HTTPException(status_code=503, detail="Model not loaded")
 
     feature_names = [
         "distance_km", "num_stops", "weight_kg", "month",
@@ -90,10 +110,10 @@ def model_info():
 
     importances = predictor.model.feature_importances_.tolist()
 
-    return jsonify({
+    return {
         "model_type":   "XGBoost",
         "feature_importances": dict(zip(feature_names, importances)),
-    })
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -101,6 +121,8 @@ def model_info():
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    import uvicorn
     port = int(os.getenv("PORT", 5000))
-    print(f"🚀 DLN-Lite ML Service running on port {port}")
-    app.run(host="0.0.0.0", port=port, debug=os.getenv("FLASK_ENV") == "development")
+    print(f"[START] DLN-Lite ML Service running on port {port} with FastAPI")
+    # Note: Use `app:app` string for reload to work
+    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=os.getenv("FLASK_ENV") == "development")

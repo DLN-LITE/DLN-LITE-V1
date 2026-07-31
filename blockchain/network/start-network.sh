@@ -29,14 +29,15 @@ cryptogen generate --config=./crypto-config.yaml --output=./crypto-config
 # Step 2: Create genesis block
 echo ""
 echo "📦 Step 2: Creating genesis block..."
-configtxgen -profile TwoOrgsOrdererGenesis \
+export FABRIC_CFG_PATH=${PWD}
+configtxgen -profile ThreeOrgsOrdererGenesis \
     -channelID system-channel \
     -outputBlock ./channel-artifacts/genesis.block
 
 # Step 3: Create channel transaction
 echo ""
 echo "📡 Step 3: Creating channel transaction..."
-configtxgen -profile TwoOrgsChannel \
+configtxgen -profile ThreeOrgsChannel \
     -outputCreateChannelTx ./channel-artifacts/${CHANNEL_NAME}.tx \
     -channelID ${CHANNEL_NAME}
 
@@ -63,6 +64,7 @@ echo "✅ Org2 joining channel..."
 docker exec -e CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org2.dln.com/users/Admin@org2.dln.com/msp \
     -e CORE_PEER_ADDRESS=peer0.org2.dln.com:9051 \
     -e CORE_PEER_LOCALMSPID="Org2MSP" \
+    -e CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org2.dln.com/peers/peer0.org2.dln.com/tls/ca.crt \
     cli peer channel join -b ${CHANNEL_NAME}.block
 
 # Step 6: Deploy chaincode
@@ -79,6 +81,27 @@ docker exec cli peer lifecycle chaincode install ${CHAINCODE_NAME}.tar.gz
 PACKAGE_ID=$(docker exec cli peer lifecycle chaincode queryinstalled 2>&1 | grep "Package ID" | awk '{print $3}' | tr -d ',')
 
 docker exec cli peer lifecycle chaincode approveformyorg \
+    -o orderer.dln.com:7050 \
+    --channelID ${CHANNEL_NAME} \
+    --name ${CHAINCODE_NAME} \
+    --version ${CHAINCODE_VERSION} \
+    --package-id ${PACKAGE_ID} \
+    --sequence 1 \
+    --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/dln.com/orderers/orderer.dln.com/msp/tlscacerts/tlsca.dln.com-cert.pem
+
+echo "✅ Org2 installing chaincode..."
+docker exec -e CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org2.dln.com/users/Admin@org2.dln.com/msp \
+    -e CORE_PEER_ADDRESS=peer0.org2.dln.com:9051 \
+    -e CORE_PEER_LOCALMSPID="Org2MSP" \
+    -e CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org2.dln.com/peers/peer0.org2.dln.com/tls/ca.crt \
+    cli peer lifecycle chaincode install ${CHAINCODE_NAME}.tar.gz
+
+echo "✅ Org2 approving chaincode..."
+docker exec -e CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org2.dln.com/users/Admin@org2.dln.com/msp \
+    -e CORE_PEER_ADDRESS=peer0.org2.dln.com:9051 \
+    -e CORE_PEER_LOCALMSPID="Org2MSP" \
+    -e CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org2.dln.com/peers/peer0.org2.dln.com/tls/ca.crt \
+    cli peer lifecycle chaincode approveformyorg \
     -o orderer.dln.com:7050 \
     --channelID ${CHANNEL_NAME} \
     --name ${CHAINCODE_NAME} \
@@ -107,6 +130,10 @@ docker exec cli peer chaincode invoke \
     --channelID ${CHANNEL_NAME} \
     --name ${CHAINCODE_NAME} \
     --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/ordererOrganizations/dln.com/orderers/orderer.dln.com/msp/tlscacerts/tlsca.dln.com-cert.pem \
+    --peerAddresses peer0.org1.dln.com:7051 \
+    --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org1.dln.com/peers/peer0.org1.dln.com/tls/ca.crt \
+    --peerAddresses peer0.org2.dln.com:9051 \
+    --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/crypto/peerOrganizations/org2.dln.com/peers/peer0.org2.dln.com/tls/ca.crt \
     -c '{"function":"InitLedger","Args":[]}'
 
 echo ""
