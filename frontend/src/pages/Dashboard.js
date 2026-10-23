@@ -1,224 +1,423 @@
 import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { getAllShipments, getSummary } from "../services/api";
-
-const STATUS_CONFIG = {
-  IN_TRANSIT: { bg: "rgba(26,108,245,0.14)", color: "#72b3ff", label: "In Transit" },
-  AT_PORT: { bg: "rgba(0,212,255,0.14)", color: "#00d4ff", label: "At Port" },
-  IN_CUSTOMS: { bg: "rgba(245,166,35,0.16)", color: "#f5a623", label: "In Customs" },
-  DELAYED: { bg: "rgba(255,68,85,0.14)", color: "#ff6674", label: "Delayed" },
-  DELIVERED: { bg: "rgba(0,230,118,0.14)", color: "#00e676", label: "Delivered" },
-  CREATED: { bg: "rgba(255,255,255,0.08)", color: "#d8e1f3", label: "Created" },
-};
-
-const METRICS = [
-  { key: "total", label: "Shipments on network", color: "#00d4ff", foot: "Cross-org ledger entries" },
-  { key: "inTransit", label: "Active in motion", color: "#2080ff", foot: "Currently progressing between checkpoints" },
-  { key: "delayed", label: "Delay incidents", color: "#ff6674", foot: "Shipments flagged for disruption" },
-];
-
-const timelineItems = [
-  {
-    title: "Immutable event capture",
-    copy: "Shipment checkpoints are committed to the shared ledger for cross-party verification.",
-    time: "Consensus layer",
-  },
-  {
-    title: "Risk scoring",
-    copy: "Predictions from the ML service flag probable delay windows before they become incidents.",
-    time: "Predictive layer",
-  },
-  {
-    title: "Operator action",
-    copy: "Routing, customs and exception management can be handled from the same command surface.",
-    time: "Operations layer",
-  },
-];
+import { useNavigate, useOutletContext } from "react-router-dom";
+import { Plus, ShieldCheck } from "lucide-react";
+import { getAllShipments, getSummary, recordEvent } from "../services/api";
+import {
+  Card,
+  StatTile,
+  StatusDot,
+  Badge,
+  RiskBar,
+  DataTable,
+  Button,
+  Skeleton,
+  EmptyState,
+} from "../components/ui";
 
 export default function Dashboard() {
+  const context = useOutletContext() || {};
+  const activeRole = context.activeRole || "shipper";
+
   const [summary, setSummary] = useState(null);
   const [shipments, setShipments] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(null);
   const navigate = useNavigate();
 
+  const reloadData = async () => {
+    try {
+      const [summaryRes, shipmentRes] = await Promise.all([getSummary(), getAllShipments()]);
+      setSummary(summaryRes.data || {});
+      setShipments(shipmentRes.data || []);
+    } catch (err) {
+      console.error("Dashboard data load error:", err);
+    }
+  };
+
   useEffect(() => {
-    Promise.all([getSummary(), getAllShipments()])
-      .then(([summaryRes, shipmentRes]) => {
-        setSummary(summaryRes.data || {});
-        setShipments(shipmentRes.data || []);
-      })
-      .catch((error) => {
-        console.error(error);
-      })
-      .finally(() => setLoading(false));
+    reloadData().finally(() => setLoading(false));
   }, []);
 
-  const activeShipments = shipments.filter((shipment) => shipment.status !== "DELIVERED");
-  const featured = [...activeShipments]
-    .sort((a, b) => (b.delayRiskScore || 0) - (a.delayRiskScore || 0))
-    .slice(0, 5);
-  const averageRisk = summary?.avgRiskScore ? `${Math.round(summary.avgRiskScore * 100)}%` : "0%";
+  const handleCustomsApprove = async (e, shipmentId, destination) => {
+    e.stopPropagation();
+    setActionLoading(shipmentId);
+    try {
+      await recordEvent(shipmentId, {
+        eventType: "CUSTOMS_CLEARED",
+        location: destination || "Inspection Port",
+        description: "Customs verified on-chain and cleared by port terminal",
+      });
+      await reloadData();
+    } catch (err) {
+      alert("Customs approval error: " + (err.response?.data?.error || err.message));
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleCarrierDepart = async (e, shipmentId, origin) => {
+    e.stopPropagation();
+    setActionLoading(shipmentId);
+    try {
+      await recordEvent(shipmentId, {
+        eventType: "DEPARTED_PORT",
+        location: origin || "Origin Berth",
+        description: "Carrier departure confirmed on blockchain ledger",
+      });
+      await reloadData();
+    } catch (err) {
+      alert("Carrier milestone error: " + (err.response?.data?.error || err.message));
+    } finally {
+      setActionLoading(null);
+    }
+  };
 
   if (loading) {
     return (
-      <div className="cf-page-shell">
-        <p className="cf-microcopy">Synchronising network state</p>
-        <h1>Loading command surface...</h1>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div className="mn-stat-grid">
+          <Skeleton height={68} />
+          <Skeleton height={68} />
+          <Skeleton height={68} />
+          <Skeleton height={68} />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1.8fr 1fr", gap: 12 }}>
+          <Skeleton height={320} />
+          <Skeleton height={320} />
+        </div>
       </div>
     );
   }
 
-  return (
-    <div>
-      <section className="cf-hero">
-        <div className="cf-panel">
-          <p className="cf-microcopy">3D logistics platform interface</p>
-          <h1 className="cf-panel-title">Shared visibility for every shipment handoff.</h1>
-          <p className="cf-panel-subtitle">
-            This UI brings the Cargo Intel concept into DLN-Lite: a cinematic operations layer with
-            blockchain verification, predictive risk scoring and live exception tracking in one place.
-          </p>
+  // 1. SHIPPER perspective
+  const shipperCreated = shipments.filter((s) => s.status === "CREATED");
+  const shipperInMotion = shipments.filter((s) => s.status === "IN_TRANSIT");
+  const shipperDelayed = shipments.filter((s) => s.status === "DELAYED");
+  const shipperTableData = shipments
+    .filter((s) => s.status !== "DELIVERED")
+    .sort((a, b) => (b.delayRiskScore || 0) - (a.delayRiskScore || 0));
 
-          <div className="cf-hero-row">
-            <span className="cf-pill">
-              <span className="cf-dot" />
-              Hyperledger-backed event chain
-            </span>
-            <button className="cf-primary-btn" onClick={() => navigate("/shipments/new")}>
-              Create shipment
-            </button>
-            <button className="cf-secondary-btn" onClick={() => navigate("/shipments")}>
-              Explore ledger
-            </button>
-          </div>
+  // 2. CARRIER perspective
+  const carrierUnderCustody = shipments.filter((s) => s.status === "IN_TRANSIT" || s.status === "AT_PORT");
+  const carrierAtPort = shipments.filter((s) => s.status === "AT_PORT");
+  const carrierDelayed = shipments.filter((s) => (s.delayRiskScore || 0) >= 0.5 || s.status === "DELAYED");
+  const carrierTableData = shipments.filter(
+    (s) => s.status === "IN_TRANSIT" || s.status === "AT_PORT" || s.status === "CREATED"
+  );
 
-          <div className="cf-stats-row">
-            <div className="cf-stat-card">
-              <div className="cf-stat-value">{summary?.total || 0}</div>
-              <div className="cf-stat-label">Tracked shipments</div>
-            </div>
-            <div className="cf-stat-card">
-              <div className="cf-stat-value">{summary?.inTransit || 0}</div>
-              <div className="cf-stat-label">Moving now</div>
-            </div>
-            <div className="cf-stat-card">
-              <div className="cf-stat-value">{averageRisk}</div>
-              <div className="cf-stat-label">Average delay risk</div>
-            </div>
-          </div>
-        </div>
+  // 3. CUSTOMS perspective
+  const customsQueue = shipments.filter((s) => s.status === "IN_CUSTOMS" || s.status === "AT_PORT");
+  const customsCleared = shipments.filter((s) => s.status === "DELIVERED");
+  const customsHighRisk = shipments.filter((s) => (s.delayRiskScore || 0) >= 0.5);
+  const customsTableData = shipments
+    .filter((s) => s.status === "IN_CUSTOMS" || s.status === "AT_PORT" || (s.delayRiskScore || 0) >= 0.4)
+    .sort((a, b) => (b.delayRiskScore || 0) - (a.delayRiskScore || 0));
 
-        <div className="cf-scene" aria-hidden="true">
-          <div className="cf-scene-inner">
-            <div className="cf-scene-label">Warehouse to port simulation</div>
-            <div className="cf-scene-visual">
-              <div className="cf-ship-node" />
-              <div className="cf-route-node" />
-              <div className="cf-route-line" />
-              <div className="cf-cargo-node" />
-            </div>
-          </div>
-        </div>
-      </section>
+  // Columns for Shipper
+  const shipperColumns = [
+    {
+      header: "Shipment ID",
+      accessor: "shipmentId",
+      render: (row) => <span className="mn-mono">{row.shipmentId}</span>,
+    },
+    {
+      header: "Destination",
+      render: (row) => (
+        <span>
+          {row.origin} → <strong>{row.destination}</strong>
+        </span>
+      ),
+    },
+    {
+      header: "Carrier",
+      accessor: "carrier",
+      render: (row) => <span style={{ color: "var(--muted)" }}>{row.carrier}</span>,
+    },
+    {
+      header: "Status",
+      render: (row) => <Badge status={row.status} dot>{row.status}</Badge>,
+    },
+    {
+      header: "Delay Risk",
+      width: 130,
+      render: (row) => <RiskBar score={row.delayRiskScore || 0} />,
+    },
+  ];
 
-      <div className="cf-section-header">
-        <div>
-          <h2 className="cf-section-title">Operations overview</h2>
-          <p className="cf-section-text">
-            The metrics and watchlist below stay wired into the current API while adopting the new interface language.
-          </p>
-        </div>
-      </div>
-
-      <section className="cf-metric-grid">
-        {METRICS.map((metric) => (
-          <article
-            key={metric.key}
-            className="cf-metric-card"
-            style={{
-              "--metric-color": metric.color,
-              "--metric-glow": `${metric.color}22`,
+  // Columns for Carrier
+  const carrierColumns = [
+    {
+      header: "Shipment ID",
+      accessor: "shipmentId",
+      render: (row) => <span className="mn-mono">{row.shipmentId}</span>,
+    },
+    {
+      header: "Corridor",
+      render: (row) => (
+        <span>
+          {row.origin} → {row.destination}
+        </span>
+      ),
+    },
+    {
+      header: "Holder",
+      accessor: "currentHolder",
+      render: (row) => <span className="mn-mono">{row.currentHolder || row.carrier || "Org1MSP"}</span>,
+    },
+    {
+      header: "Status",
+      render: (row) => <Badge status={row.status} dot>{row.status}</Badge>,
+    },
+    {
+      header: "Risk",
+      width: 110,
+      render: (row) => <RiskBar score={row.delayRiskScore || 0} />,
+    },
+    {
+      header: "Action",
+      width: 120,
+      render: (row) =>
+        row.status === "CREATED" ? (
+          <Button
+            variant="secondary"
+            onClick={(e) => handleCarrierDepart(e, row.shipmentId, row.origin)}
+            disabled={actionLoading === row.shipmentId}
+          >
+            {actionLoading === row.shipmentId ? "Signing..." : "Depart Port"}
+          </Button>
+        ) : (
+          <Button
+            variant="ghost"
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(`/shipments/${row.shipmentId}`);
             }}
           >
-            <div className="cf-metric-kicker">{metric.label}</div>
-            <div className="cf-metric-value">{summary?.[metric.key] || 0}</div>
-            <div className="cf-metric-foot">{metric.foot}</div>
-          </article>
-        ))}
-      </section>
+            Transfer
+          </Button>
+        ),
+    },
+  ];
 
-      <section className="cf-detail-grid">
-        <article className="cf-list-card">
-          <div className="cf-card-header">
-            <div>
-              <h3 className="cf-card-title">Priority shipment watchlist</h3>
-              <p className="cf-section-text">Highest-risk in-flight shipments surfaced for action.</p>
-            </div>
-            <span className="cf-chip">{featured.length} active</span>
-          </div>
+  // Columns for Customs
+  const customsColumns = [
+    {
+      header: "Manifest ID",
+      accessor: "containerId",
+      render: (row) => (
+        <div>
+          <span className="mn-mono">{row.containerId || row.shipmentId}</span>
+          <div style={{ fontSize: 11, color: "var(--muted)" }}>Cargo: {row.cargoType}</div>
+        </div>
+      ),
+    },
+    {
+      header: "Entry Port",
+      render: (row) => <span>{row.destination}</span>,
+    },
+    {
+      header: "Weight",
+      render: (row) => (
+        <span className="mn-mono">
+          {row.weightKg ? `${row.weightKg.toLocaleString()} kg` : "—"}
+        </span>
+      ),
+    },
+    {
+      header: "Status",
+      render: (row) => <Badge status={row.status} dot>{row.status}</Badge>,
+    },
+    {
+      header: "Clearance Action",
+      width: 130,
+      render: (row) =>
+        row.status === "DELIVERED" ? (
+          <Badge variant="ok">✓ Cleared</Badge>
+        ) : (
+          <Button
+            variant="primary"
+            onClick={(e) => handleCustomsApprove(e, row.shipmentId, row.destination)}
+            disabled={actionLoading === row.shipmentId}
+          >
+            {actionLoading === row.shipmentId ? "Clearing..." : "Approve"}
+          </Button>
+        ),
+    },
+  ];
 
-          <div className="cf-shipment-list">
-            {featured.length === 0 ? (
-              <div className="cf-shipment-row">
-                <div className="cf-shipment-meta">
-                  <div className="cf-shipment-id">No active high-risk shipments</div>
-                  <div className="cf-shipment-route">The network is currently stable.</div>
-                </div>
-              </div>
-            ) : (
-              featured.map((shipment) => {
-                const status = STATUS_CONFIG[shipment.status] || STATUS_CONFIG.CREATED;
-                return (
-                  <div
-                    key={shipment.shipmentId}
-                    className="cf-shipment-row"
-                    onClick={() => navigate(`/shipments/${shipment.shipmentId}`)}
-                  >
-                    <div className="cf-shipment-meta">
-                      <div className="cf-shipment-id">{shipment.shipmentId}</div>
-                      <div className="cf-shipment-route">
-                        {shipment.origin} to {shipment.destination} via {shipment.carrier}
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {/* ── Compact Role Banner ── */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "6px 12px",
+          borderRadius: 6,
+          border: "1px solid var(--border)",
+          backgroundColor: "var(--surface)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Badge variant={activeRole === "shipper" ? "ok" : activeRole === "carrier" ? "warn" : "neutral"} dot>
+            {activeRole.toUpperCase()} OPERATIONS
+          </Badge>
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>
+            {activeRole === "shipper" && "Warehouse dispatch, outbound consignments, and manifest creation."}
+            {activeRole === "carrier" && "In-transit voyage monitoring, custody handoffs, and checkpoint updates."}
+            {activeRole === "customs" && "Port terminal clearance, manifest audit, and regulatory inspection."}
+          </span>
+        </div>
+
+        {activeRole === "shipper" && (
+          <Button variant="primary" onClick={() => navigate("/shipments/new")}>
+            <Plus size={13} strokeWidth={1.75} />
+            <span>Create Shipment</span>
+          </Button>
+        )}
+      </div>
+
+      {/* ── Compact StatTiles ── */}
+      {activeRole === "shipper" && (
+        <div className="mn-stat-grid">
+          <StatTile label="Outbound total" value={shipments.length} sub="Registered on ledger" />
+          <StatTile label="Awaiting dispatch" value={shipperCreated.length} sub="Status CREATED" />
+          <StatTile label="In motion" value={shipperInMotion.length} sub="Under carrier transit" />
+          <StatTile label="Delayed handoffs" value={shipperDelayed.length} sub="SLA escalation" />
+        </div>
+      )}
+
+      {activeRole === "carrier" && (
+        <div className="mn-stat-grid">
+          <StatTile label="Fleet under custody" value={carrierUnderCustody.length || shipments.length} sub="Active custody" />
+          <StatTile label="Sailing in transit" value={carrierUnderCustody.filter((s) => s.status === "IN_TRANSIT").length} sub="En route" />
+          <StatTile label="At port transfers" value={carrierAtPort.length} sub="Terminal exchange" />
+          <StatTile label="Weather / risk alerts" value={carrierDelayed.length} sub="High-risk voyages" />
+        </div>
+      )}
+
+      {activeRole === "customs" && (
+        <div className="mn-stat-grid">
+          <StatTile label="In customs queue" value={customsQueue.length} sub="Awaiting clearance" />
+          <StatTile label="Audit holds" value={customsHighRisk.length} sub="Risk >= 50%" />
+          <StatTile label="Cleared & delivered" value={customsCleared.length} sub="Finalized on ledger" />
+          <StatTile label="Audited cargo" value={shipments.length} sub="Full manifest register" />
+        </div>
+      )}
+
+      {/* ── Main Operations Grid: 1.8fr Primary Table / 1fr Watchlist ── */}
+      {/* ── Main Operations Grid: Primary Action Table & Priority Watchlist ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.9fr) minmax(310px, 1fr)", gap: 12, alignItems: "start" }}>
+        {/* Left: Role-Specific Action Table */}
+        <Card
+          className="flush"
+          title={
+            activeRole === "shipper"
+              ? "Outbound dispatch queue"
+              : activeRole === "carrier"
+              ? "Transit fleet under custody"
+              : "Port terminal inspection queue"
+          }
+          action={
+            <span style={{ fontSize: 11, color: "var(--muted)" }}>
+              {activeRole === "shipper" && `${shipperTableData.length} dispatches`}
+              {activeRole === "carrier" && `${carrierTableData.length} vessels`}
+              {activeRole === "customs" && `${customsTableData.length} pending`}
+            </span>
+          }
+        >
+          <DataTable
+            columns={
+              activeRole === "shipper"
+                ? shipperColumns
+                : activeRole === "carrier"
+                ? carrierColumns
+                : customsColumns
+            }
+            data={
+              activeRole === "shipper"
+                ? shipperTableData.slice(0, 5)
+                : activeRole === "carrier"
+                ? carrierTableData.slice(0, 5)
+                : customsTableData.slice(0, 5)
+            }
+            keyField="shipmentId"
+            onRowClick={(row) => navigate(`/shipments/${row.shipmentId}`)}
+          />
+        </Card>
+
+        {/* Right: Compact Priority Watchlist */}
+        <Card
+          title={
+            <span style={{ whiteSpace: "nowrap" }}>
+              {activeRole === "shipper"
+                ? "Outbound risk alerts"
+                : activeRole === "carrier"
+                ? "Voyage disruptions"
+                : "Inspection holds"}
+            </span>
+          }
+          action={<span style={{ fontSize: 11, color: "var(--muted)", whiteSpace: "nowrap" }}>Priority</span>}
+        >
+          {shipments.filter((s) => (s.delayRiskScore || 0) >= 0.35 && s.status !== "DELIVERED").length === 0 ? (
+            <EmptyState message="All shipments within parameters." />
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+              {shipments
+                .filter((s) => (s.delayRiskScore || 0) >= 0.35 && s.status !== "DELIVERED")
+                .sort((a, b) => (b.delayRiskScore || 0) - (a.delayRiskScore || 0))
+                .slice(0, 4)
+                .map((s) => {
+                  const riskPct = Math.round((s.delayRiskScore || 0) * 100);
+                  return (
+                    <div
+                      key={s.shipmentId}
+                      onClick={() => navigate(`/shipments/${s.shipmentId}`)}
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 3,
+                        padding: "7px 9px",
+                        borderRadius: 6,
+                        border: "1px solid var(--border)",
+                        cursor: "pointer",
+                        transition: "background-color 150ms var(--ease)",
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--hover)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <StatusDot status={s.status} />
+                          <span style={{ fontWeight: 600, fontSize: 12 }} className="mn-mono">
+                            {s.shipmentId}
+                          </span>
+                        </div>
+                        <Badge variant={riskPct >= 65 ? "bad" : "warn"}>
+                          {riskPct}%
+                        </Badge>
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "var(--muted)",
+                          paddingLeft: 14,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                        title={`${s.origin} → ${s.destination}`}
+                      >
+                        {s.origin} → {s.destination}
                       </div>
                     </div>
-
-                    <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                      <div className="cf-pill">Risk {(Math.round((shipment.delayRiskScore || 0) * 100))}%</div>
-                      <span
-                        className="cf-status-pill"
-                        style={{
-                          "--status-bg": status.bg,
-                          "--status-color": status.color,
-                        }}
-                      >
-                        {status.label}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </article>
-
-        <aside className="cf-list-card">
-          <div className="cf-card-header">
-            <div>
-              <h3 className="cf-card-title">How this UI maps to the platform</h3>
-              <p className="cf-section-text">The reference design translated into app-ready surfaces.</p>
+                  );
+                })}
             </div>
-          </div>
-
-          <div className="cf-timeline">
-            {timelineItems.map((item) => (
-              <div key={item.title} className="cf-timeline-item">
-                <div className="cf-timeline-title">{item.title}</div>
-                <div className="cf-timeline-copy">{item.copy}</div>
-                <div className="cf-timeline-time">{item.time}</div>
-              </div>
-            ))}
-          </div>
-        </aside>
-      </section>
+          )}
+        </Card>
+      </div>
     </div>
   );
 }

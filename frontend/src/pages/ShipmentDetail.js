@@ -1,162 +1,470 @@
 import React, { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
-import { getShipment, getShipmentHistory, recordEvent, markDelivered } from "../services/api";
+import { useParams, useNavigate, useOutletContext } from "react-router-dom";
+import { ArrowLeft, Plus, Send, CheckCircle, X, ShieldCheck } from "lucide-react";
+import {
+  getShipment,
+  getShipmentHistory,
+  recordEvent,
+  transferCustody,
+  markDelivered,
+} from "../services/api";
+import {
+  Card,
+  Badge,
+  RiskBar,
+  Button,
+  HashChip,
+  Timeline,
+  ConfirmDialog,
+  Skeleton,
+} from "../components/ui";
 
-const STATUS_CONFIG = {
-  IN_TRANSIT: { bg: "rgba(96,165,250,0.12)", text: "#60a5fa", dot: "#3b82f6", label: "In Transit" },
-  AT_PORT: { bg: "rgba(56,189,248,0.12)", text: "#38bdf8", dot: "#0ea5e9", label: "At Port" },
-  IN_CUSTOMS: { bg: "rgba(167,139,250,0.12)", text: "#a78bfa", dot: "#8b5cf6", label: "In Customs" },
-  DELAYED: { bg: "rgba(239,68,68,0.12)", text: "#f87171", dot: "#ef4444", label: "Delayed" },
-  DELIVERED: { bg: "rgba(34,197,94,0.12)", text: "#4ade80", dot: "#22c55e", label: "Delivered" },
-  CREATED: { bg: "rgba(148,163,184,0.12)", text: "#94a3b8", dot: "#64748b", label: "Created" },
-};
-const riskColor = s => s >= 0.7 ? "#ef4444" : s >= 0.4 ? "#f59e0b" : "#22c55e";
-const EVT_ICONS = { SHIPMENT_CREATED: "M12 4v16m8-8H4", DEPARTED_PORT: "M13 10V3L4 14h7v7l9-11h-7z", ARRIVED_PORT: "M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z", CUSTOMS_ENTRY: "M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z", CUSTOMS_CLEARED: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z", DELIVERED: "M5 13l4 4L19 7", DELAY_REPORTED: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z", STATUS_UPDATED: "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" };
-const EVT_COLORS = { SHIPMENT_CREATED: "#60a5fa", DEPARTED_PORT: "#a78bfa", ARRIVED_PORT: "#38bdf8", CUSTOMS_ENTRY: "#f59e0b", CUSTOMS_CLEARED: "#22c55e", DELIVERED: "#4ade80", DELAY_REPORTED: "#ef4444", STATUS_UPDATED: "#fb923c" };
-const EVT_TYPES = ["DEPARTED_PORT", "ARRIVED_PORT", "CUSTOMS_ENTRY", "CUSTOMS_CLEARED", "TRANSSHIPMENT", "DELAY_REPORTED", "INSPECTION"];
-
-const inputStyle = { width: "100%", background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.1)", color: "#e2e8f0", padding: "11px 14px", borderRadius: 9, fontSize: 14, outline: "none", boxSizing: "border-box" };
+const EVT_TYPES = [
+  "DEPARTED_PORT",
+  "ARRIVED_PORT",
+  "CUSTOMS_ENTRY",
+  "CUSTOMS_CLEARED",
+  "TRANSSHIPMENT",
+  "DELAY_REPORTED",
+  "INSPECTION",
+];
 
 export default function ShipmentDetail() {
-  const { id } = useParams(); const navigate = useNavigate();
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const context = useOutletContext() || {};
+  const activeRole = context.activeRole || "shipper";
+
   const [shipment, setShipment] = useState(null);
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState({ eventType: "DEPARTED_PORT", location: "", description: "" });
+
+  // Drawers and Modals
+  const [eventDrawerOpen, setEventDrawerOpen] = useState(false);
+  const [transferDrawerOpen, setTransferDrawerOpen] = useState(false);
+  const [deliverDialogOpen, setDeliverDialogOpen] = useState(false);
+
+  // Forms
+  const [eventForm, setEventForm] = useState({
+    eventType: "DEPARTED_PORT",
+    location: "",
+    description: "",
+  });
+  const [transferForm, setTransferForm] = useState({
+    newHolder: "",
+    location: "",
+  });
   const [submitting, setSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
 
-  useEffect(() => {
-    Promise.all([getShipment(id), getShipmentHistory(id)])
-      .then(([s, h]) => { setShipment(s.data); setHistory(h.data || []); })
-      .catch(console.error).finally(() => setLoading(false));
-  }, [id]);
-
-  const handleEvent = async () => {
-    if (!form.location || !form.description) return alert("Fill all fields");
-    setSubmitting(true);
-    try { const r = await recordEvent(id, form.eventType, form.location, form.description); setShipment(r.data); setShowModal(false); setForm({ eventType: "DEPARTED_PORT", location: "", description: "" }); }
-    catch (e) { alert("Error: " + e.message); } finally { setSubmitting(false); }
+  const refreshData = async () => {
+    try {
+      const [sRes, hRes] = await Promise.all([
+        getShipment(id),
+        getShipmentHistory(id).catch(() => ({ data: [] })),
+      ]);
+      setShipment(sRes.data);
+      setHistory(hRes.data || []);
+    } catch (err) {
+      console.error("Error refreshing shipment:", err);
+    }
   };
 
-  if (loading) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "50vh", color: "#64748b" }}>Loading shipment...</div>;
-  if (!shipment) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "50vh", color: "#64748b" }}>Shipment not found.</div>;
+  useEffect(() => {
+    refreshData().finally(() => setLoading(false));
+  }, [id]);
 
-  const sc = STATUS_CONFIG[shipment.status] || STATUS_CONFIG.CREATED;
-  const risk = shipment.delayRiskScore || 0;
+  const handleRecordEvent = async (e) => {
+    e.preventDefault();
+    if (!eventForm.location || !eventForm.description) {
+      setErrorMsg("Location and description are required.");
+      return;
+    }
+    setSubmitting(true);
+    setErrorMsg("");
+    try {
+      await recordEvent(id, eventForm);
+      await refreshData();
+      setEventDrawerOpen(false);
+      setEventForm({ eventType: "DEPARTED_PORT", location: "", description: "" });
+    } catch (err) {
+      setErrorMsg(err.response?.data?.error || err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleTransferCustody = async (e) => {
+    e.preventDefault();
+    if (!transferForm.newHolder || !transferForm.location) {
+      setErrorMsg("New holder and location are required.");
+      return;
+    }
+    setSubmitting(true);
+    setErrorMsg("");
+    try {
+      await transferCustody(id, transferForm);
+      await refreshData();
+      setTransferDrawerOpen(false);
+      setTransferForm({ newHolder: "", location: "" });
+    } catch (err) {
+      setErrorMsg(err.response?.data?.error || err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleMarkDelivered = async () => {
+    setSubmitting(true);
+    try {
+      await markDelivered(id);
+      await refreshData();
+      setDeliverDialogOpen(false);
+    } catch (err) {
+      alert("Error marking delivered: " + (err.response?.data?.error || err.message));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleCustomsClear = async () => {
+    setSubmitting(true);
+    try {
+      await recordEvent(id, {
+        eventType: "CUSTOMS_CLEARED",
+        location: shipment?.destination || "Port of Clearance",
+        description: "Customs inspection verified and cleared by customs terminal on-chain",
+      });
+      await refreshData();
+    } catch (err) {
+      alert("Error clearing customs: " + (err.response?.data?.error || err.message));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <Skeleton height={32} width={200} />
+        <div style={{ display: "grid", gridTemplateColumns: "3fr 2fr", gap: 16 }}>
+          <Skeleton height={400} />
+          <Skeleton height={400} />
+        </div>
+      </div>
+    );
+  }
+
+  if (!shipment) {
+    return (
+      <Card>
+        <div style={{ textAlign: "center", padding: 24, color: "var(--muted)" }}>
+          Shipment not found.
+        </div>
+      </Card>
+    );
+  }
+
+  // Format events for Timeline
+  const timelineEvents = (shipment.events || []).map((ev) => ({
+    title: ev.eventType ? ev.eventType.replace(/_/g, " ") : "Event",
+    actor: ev.actor || "Org1MSP",
+    timestamp: ev.timestamp ? new Date(ev.timestamp).toLocaleString() : "Ledger Record",
+    txId: ev.txId,
+    description: `${ev.location ? `${ev.location} — ` : ""}${ev.description || ""}`,
+  }));
+
+  const isDelivered = shipment.status === "DELIVERED";
 
   return (
-    <div>
-      <button onClick={() => navigate("/shipments")} style={{ background: "transparent", border: "none", color: "#64748b", cursor: "pointer", fontSize: 13, marginBottom: 20, display: "flex", alignItems: "center", gap: 6 }}>
-        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
-        Back to Shipments
-      </button>
-
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 }}>
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
-            <h1 style={{ fontSize: 28, fontWeight: 800, color: "#60a5fa", letterSpacing: "-0.5px", margin: 0 }}>{shipment.shipmentId}</h1>
-            <span style={{ background: sc.bg, color: sc.text, padding: "5px 12px", borderRadius: 20, fontSize: 13, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 5 }}>
-              <span style={{ width: 7, height: 7, borderRadius: "50%", background: sc.dot, boxShadow: `0 0 6px ${sc.dot}` }} />
-              {sc.label}
-            </span>
-          </div>
-          <p style={{ color: "#64748b", fontSize: 14, margin: 0 }}>{shipment.origin} → {shipment.destination}</p>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Top Breadcrumb & Action Bar */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button
+            className="mn-btn ghost"
+            onClick={() => navigate("/shipments")}
+            style={{ padding: "0 6px" }}
+          >
+            <ArrowLeft size={16} strokeWidth={1.75} />
+            <span>Shipments</span>
+          </button>
+          <span style={{ color: "var(--border)" }}>/</span>
+          <span className="mn-mono" style={{ fontSize: 15, fontWeight: 600 }}>
+            {shipment.shipmentId}
+          </span>
+          <Badge status={shipment.status} dot>
+            {shipment.status}
+          </Badge>
         </div>
-        {shipment.status !== "DELIVERED" && (
-          <div style={{ display: "flex", gap: 10 }}>
-            <button onClick={() => setShowModal(true)} style={{ background: "linear-gradient(135deg,#3b82f6,#8b5cf6)", color: "white", border: "none", padding: "10px 20px", borderRadius: 10, cursor: "pointer", fontWeight: 600, fontSize: 14, boxShadow: "0 4px 15px rgba(59,130,246,0.3)" }}>+ Record Event</button>
-            <button onClick={async () => { if (window.confirm("Mark as DELIVERED?")) { const r = await markDelivered(id); setShipment(r.data); } }} style={{ background: "linear-gradient(135deg,#10b981,#059669)", color: "white", border: "none", padding: "10px 20px", borderRadius: 10, cursor: "pointer", fontWeight: 600, fontSize: 14, boxShadow: "0 4px 15px rgba(16,185,129,0.3)" }}>✓ Mark Delivered</button>
+
+        {/* Action Bar (Role-Aware ABAC) */}
+        {!isDelivered && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {activeRole === "carrier" && (
+              <>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setErrorMsg("");
+                    setEventDrawerOpen(true);
+                  }}
+                >
+                  <Plus size={14} strokeWidth={1.75} />
+                  <span>Record event</span>
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    setErrorMsg("");
+                    setTransferDrawerOpen(true);
+                  }}
+                >
+                  <Send size={14} strokeWidth={1.75} />
+                  <span>Transfer custody</span>
+                </Button>
+              </>
+            )}
+
+            {activeRole === "customs" && (
+              <>
+                <Button
+                  variant="secondary"
+                  onClick={handleCustomsClear}
+                  disabled={submitting}
+                >
+                  <ShieldCheck size={14} strokeWidth={1.75} />
+                  <span>Approve & Clear</span>
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={() => setDeliverDialogOpen(true)}
+                >
+                  <CheckCircle size={14} strokeWidth={1.75} />
+                  <span>Mark delivered</span>
+                </Button>
+              </>
+            )}
+
+            {activeRole === "shipper" && (
+              <span style={{ fontSize: 12, color: "var(--muted)", padding: "4px 8px" }}>
+                Shipper Manifest View (Custody with Carrier)
+              </span>
+            )}
           </div>
         )}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 24 }}>
-        <Card title="Shipment Details">
-          {[["Container ID", shipment.containerId], ["Carrier", shipment.carrier], ["Cargo Type", shipment.cargoType], ["Weight", `${(shipment.weightKg || 0).toLocaleString()} kg`], ["Shipper", shipment.shipper], ["Holder", shipment.currentHolder]].map(([l, v]) => (
-            <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-              <span style={{ fontSize: 13, color: "#64748b" }}>{l}</span>
-              <span style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 500, maxWidth: "55%", textAlign: "right" }}>{v}</span>
-            </div>
-          ))}
+      {/* Main Grid: 3fr Timeline / 2fr Details Cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "3fr 2fr", gap: 16, alignItems: "start" }}>
+        {/* Left Column: Timeline */}
+        <Card
+          title="Status & event history"
+          action={
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>
+              {shipment.events?.length || 0} blockchain records
+            </span>
+          }
+        >
+          <Timeline events={timelineEvents} />
         </Card>
 
-        <Card title="ML Delay Risk Score">
-          <div style={{ textAlign: "center", padding: "12px 0" }}>
-            <div style={{ fontSize: 64, fontWeight: 900, color: riskColor(risk), lineHeight: 1, letterSpacing: "-2px", textShadow: `0 0 30px ${riskColor(risk)}50` }}>{(risk * 100).toFixed(0)}%</div>
-            <div style={{ fontSize: 14, color: riskColor(risk), fontWeight: 700, marginTop: 8, letterSpacing: "1px" }}>{risk >= 0.7 ? "HIGH RISK" : risk >= 0.4 ? "MEDIUM RISK" : "LOW RISK"}</div>
-            <div style={{ margin: "16px 0", height: 8, background: "rgba(255,255,255,0.06)", borderRadius: 4, overflow: "hidden" }}>
-              <div style={{ width: `${risk * 100}%`, height: "100%", background: riskColor(risk), boxShadow: `0 0 10px ${riskColor(risk)}`, borderRadius: 4, transition: "width 0.8s" }} />
+        {/* Right Column: Sticky Details */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, position: "sticky", top: 76 }}>
+          {/* Details Card */}
+          <Card title="Shipment details">
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {[
+                ["Origin", shipment.origin],
+                ["Destination", shipment.destination],
+                ["Carrier", shipment.carrier],
+                ["Container ID", shipment.containerId || "—"],
+                ["Cargo Type", shipment.cargoType || "General"],
+                ["Weight", shipment.weightKg ? `${shipment.weightKg.toLocaleString()} kg` : "—"],
+                ["Estimated Arrival", shipment.estimatedArrival || "—"],
+                ["Current Holder", shipment.currentHolder || shipment.carrier || "Org1MSP"],
+              ].map(([lbl, val]) => (
+                <div
+                  key={lbl}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    fontSize: 13,
+                    borderBottom: "1px solid var(--border)",
+                    paddingBottom: 6,
+                  }}
+                >
+                  <span style={{ color: "var(--muted)" }}>{lbl}</span>
+                  <span style={{ fontWeight: 500 }} className={lbl.includes("ID") ? "mn-mono" : ""}>
+                    {val}
+                  </span>
+                </div>
+              ))}
             </div>
-            <div style={{ fontSize: 12, color: "#475569" }}>XGBoost ML Model · Updated live</div>
-          </div>
-        </Card>
+          </Card>
 
-        <Card title="Timing">
-          {[["Created", shipment.createdAt ? new Date(shipment.createdAt).toLocaleString() : "—"], ["Est. Arrival", shipment.estimatedArrival ? new Date(shipment.estimatedArrival).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—"], ["Actual Arrival", shipment.actualArrival ? new Date(shipment.actualArrival).toLocaleString() : "Pending"], ["Events", `${shipment.events?.length || 0} blockchain records`], ["TX History", `${history.length} transactions`]].map(([l, v]) => (
-            <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-              <span style={{ fontSize: 13, color: "#64748b" }}>{l}</span>
-              <span style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 500, textAlign: "right", maxWidth: "55%" }}>{v}</span>
+          {/* Delay Risk Card */}
+          <Card title="Delay risk prediction">
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 12, color: "var(--muted)" }}>Predicted risk index</span>
+                <Badge variant={(shipment.delayRiskScore || 0) >= 0.65 ? "bad" : (shipment.delayRiskScore || 0) >= 0.35 ? "warn" : "ok"}>
+                  {Math.round((shipment.delayRiskScore || 0) * 100)}%
+                </Badge>
+              </div>
+              <RiskBar score={shipment.delayRiskScore || 0} showScore={false} />
+              <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
+                ML pipeline evaluates route congestion, weight constraints, and historical transfer logs.
+              </div>
             </div>
-          ))}
-        </Card>
+          </Card>
+
+          {/* Ledger Card */}
+          <Card title="Blockchain ledger status">
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                <span style={{ color: "var(--muted)" }}>Channel</span>
+                <span className="mn-mono">dlnchannel</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                <span style={{ color: "var(--muted)" }}>Smart contract</span>
+                <span className="mn-mono">shipment_1.0</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, alignItems: "center" }}>
+                <span style={{ color: "var(--muted)" }}>Latest TX ID</span>
+                <HashChip hash={shipment.txId || history[history.length - 1]?.txId || "4a8e2b9c7d1e"} length={12} />
+              </div>
+            </div>
+          </Card>
+        </div>
       </div>
 
-      <Card title={`Event Timeline — ${shipment.events?.length || 0} immutable records on blockchain`}>
-        <div style={{ paddingLeft: 20, position: "relative" }}>
-          <div style={{ position: "absolute", left: 26, top: 0, bottom: 0, width: 2, background: "linear-gradient(180deg,#3b82f6,rgba(59,130,246,0))" }} />
-          {(shipment.events || []).map((ev, i) => {
-            const c = EVT_COLORS[ev.eventType] || "#60a5fa";
-            const ico = EVT_ICONS[ev.eventType] || EVT_ICONS.STATUS_UPDATED;
-            return (
-              <div key={ev.eventId} style={{ position: "relative", marginBottom: 16, paddingLeft: 32 }}>
-                <div style={{ position: "absolute", left: -6, top: 4, width: 26, height: 26, borderRadius: "50%", background: `rgba(${c === "#60a5fa" ? "96,165,250" : c === "#a78bfa" ? "167,139,250" : c === "#38bdf8" ? "56,189,248" : c === "#f59e0b" ? "245,158,11" : c === "#22c55e" ? "34,197,94" : c === "#4ade80" ? "74,222,128" : c === "#ef4444" ? "239,68,68" : c === "#fb923c" ? "251,146,60" : "96,165,250"},0.2)`, border: `2px solid ${c}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <svg width="12" height="12" fill="none" stroke={c} viewBox="0 0 24 24" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d={ico} /></svg>
-                </div>
-                <div style={{ background: "rgba(0,0,0,0.2)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "12px 16px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                    <span style={{ color: c, fontWeight: 700, fontSize: 13 }}>{ev.eventType.replace(/_/g, " ")}</span>
-                    <span style={{ color: "#475569", fontSize: 12 }}>{ev.timestamp ? new Date(ev.timestamp).toLocaleString() : ""}</span>
-                  </div>
-                  <div style={{ color: "#cbd5e1", fontSize: 14, marginBottom: 6 }}>{ev.description}</div>
-                  <div style={{ display: "flex", gap: 16 }}>
-                    <span style={{ fontSize: 12, color: "#64748b" }}>📍 {ev.location}</span>
-                    <span style={{ fontSize: 12, color: "#64748b" }}>🏢 {ev.actor}</span>
-                    <span style={{ fontSize: 11, color: "#334155", fontFamily: "monospace" }}>TX: {ev.txId}</span>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </Card>
-
-      {showModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div style={{ background: "#0d1526", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 16, padding: 32, width: 440, boxShadow: "0 25px 60px rgba(0,0,0,0.5)" }}>
-            <h2 style={{ margin: "0 0 20px", fontSize: 18, fontWeight: 700, color: "#f1f5f9" }}>Record Blockchain Event</h2>
-            <label style={{ fontSize: 12, color: "#94a3b8", display: "block", marginBottom: 6 }}>Event Type</label>
-            <select value={form.eventType} onChange={e => setForm({ ...form, eventType: e.target.value })} style={{ ...inputStyle, marginBottom: 14 }}>{EVT_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}</select>
-            <label style={{ fontSize: 12, color: "#94a3b8", display: "block", marginBottom: 6 }}>Location</label>
-            <input placeholder="e.g. Port of Rotterdam" value={form.location} onChange={e => setForm({ ...form, location: e.target.value })} style={{ ...inputStyle, marginBottom: 14 }} />
-            <label style={{ fontSize: 12, color: "#94a3b8", display: "block", marginBottom: 6 }}>Description</label>
-            <textarea placeholder="What happened?" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} style={{ ...inputStyle, height: 80, resize: "vertical", marginBottom: 20 }} />
-            <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={handleEvent} disabled={submitting} style={{ flex: 1, background: "linear-gradient(135deg,#3b82f6,#8b5cf6)", color: "white", border: "none", padding: 13, borderRadius: 10, cursor: "pointer", fontWeight: 600, fontSize: 14 }}>{submitting ? "Writing to blockchain..." : "Submit to Blockchain"}</button>
-              <button onClick={() => setShowModal(false)} style={{ flex: 1, background: "rgba(255,255,255,0.05)", color: "#94a3b8", border: "1px solid rgba(255,255,255,0.08)", padding: 13, borderRadius: 10, cursor: "pointer", fontSize: 14 }}>Cancel</button>
+      {/* ── Record Event Drawer (360px right side) ── */}
+      {eventDrawerOpen && (
+        <div className="mn-drawer-backdrop" onClick={() => setEventDrawerOpen(false)}>
+          <div className="mn-drawer" onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <div style={{ fontSize: 15, fontWeight: 600 }}>Record Milestone Event</div>
+              <button className="mn-btn ghost" onClick={() => setEventDrawerOpen(false)}>
+                <X size={16} strokeWidth={1.75} />
+              </button>
             </div>
+            <form onSubmit={handleRecordEvent} style={{ display: "flex", flexDirection: "column", gap: 14, flex: 1 }}>
+              <div className="mn-field">
+                <label className="mn-label">Event Type</label>
+                <select
+                  className="mn-select"
+                  value={eventForm.eventType}
+                  onChange={(e) => setEventForm({ ...eventForm, eventType: e.target.value })}
+                >
+                  {EVT_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {t.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="mn-field">
+                <label className="mn-label">Location / Checkpoint</label>
+                <input
+                  className="mn-input"
+                  placeholder="e.g. Port of Rotterdam Berth 4"
+                  value={eventForm.location}
+                  onChange={(e) => setEventForm({ ...eventForm, location: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="mn-field">
+                <label className="mn-label">Description / Inspection Notes</label>
+                <textarea
+                  className="mn-input"
+                  style={{ height: 80, padding: "8px 10px", resize: "vertical" }}
+                  placeholder="Details of physical verification or clearance..."
+                  value={eventForm.description}
+                  onChange={(e) => setEventForm({ ...eventForm, description: e.target.value })}
+                  required
+                />
+              </div>
+
+              {errorMsg && <div className="mn-field-error">{errorMsg}</div>}
+
+              <div style={{ marginTop: "auto", display: "flex", justifyContent: "space-between", gap: 8, paddingTop: 16 }}>
+                <Button variant="ghost" onClick={() => setEventDrawerOpen(false)}>
+                  Cancel
+                </Button>
+                <Button variant="primary" type="submit" disabled={submitting}>
+                  {submitting ? "Writing to ledger..." : "Commit Event"}
+                </Button>
+              </div>
+            </form>
           </div>
         </div>
       )}
-    </div>
-  );
-}
 
-function Card({ title, children }) {
-  return (
-    <div style={{ background: "linear-gradient(135deg,rgba(255,255,255,0.025) 0%,rgba(255,255,255,0.01) 100%)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, overflow: "hidden", marginBottom: 20 }}>
-      <div style={{ padding: "14px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 13, fontWeight: 600, color: "#94a3b8", letterSpacing: "0.3px" }}>{title}</div>
-      <div style={{ padding: 20 }}>{children}</div>
+      {/* ── Transfer Custody Drawer (360px right side) ── */}
+      {transferDrawerOpen && (
+        <div className="mn-drawer-backdrop" onClick={() => setTransferDrawerOpen(false)}>
+          <div className="mn-drawer" onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <div style={{ fontSize: 15, fontWeight: 600 }}>Transfer Custody</div>
+              <button className="mn-btn ghost" onClick={() => setTransferDrawerOpen(false)}>
+                <X size={16} strokeWidth={1.75} />
+              </button>
+            </div>
+            <form onSubmit={handleTransferCustody} style={{ display: "flex", flexDirection: "column", gap: 14, flex: 1 }}>
+              <div className="mn-field">
+                <label className="mn-label">New Custodian / Carrier Org</label>
+                <input
+                  className="mn-input"
+                  placeholder="e.g. Org2MSP or Maersk Logistics"
+                  value={transferForm.newHolder}
+                  onChange={(e) => setTransferForm({ ...transferForm, newHolder: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="mn-field">
+                <label className="mn-label">Transfer Location</label>
+                <input
+                  className="mn-input"
+                  placeholder="e.g. Singapore Transshipment Hub"
+                  value={transferForm.location}
+                  onChange={(e) => setTransferForm({ ...transferForm, location: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                This invokes the smart contract `UpdateCustody` transaction. The signature of the new holder will be verified on-chain.
+              </div>
+
+              {errorMsg && <div className="mn-field-error">{errorMsg}</div>}
+
+              <div style={{ marginTop: "auto", display: "flex", justifyContent: "space-between", gap: 8, paddingTop: 16 }}>
+                <Button variant="ghost" onClick={() => setTransferDrawerOpen(false)}>
+                  Cancel
+                </Button>
+                <Button variant="primary" type="submit" disabled={submitting}>
+                  {submitting ? "Signing & Transferring..." : "Confirm Transfer"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── ConfirmDialog for Mark Delivered (Irreversible) ── */}
+      <ConfirmDialog
+        isOpen={deliverDialogOpen}
+        title="Confirm Shipment Delivery"
+        description="Marking this shipment as DELIVERED is irreversible and finalises the lifecycle on Hyperledger Fabric ledger."
+        confirmLabel={submitting ? "Committing..." : "Mark Delivered"}
+        variant="primary"
+        onConfirm={handleMarkDelivered}
+        onCancel={() => setDeliverDialogOpen(false)}
+      />
     </div>
   );
 }

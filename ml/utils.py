@@ -25,6 +25,11 @@ PORTS = [
     "Busan",
     "Dubai",
     "Colombo",
+    "Antwerp",
+    "Santos",
+    "Hong Kong",
+    "Valencia",
+    "Sydney",
 ]
 
 CARRIERS = [
@@ -84,7 +89,7 @@ def encode_features(features: dict, encoders: dict) -> dict:
     encoded["route_avg_delay_days"]   = float(features.get("route_avg_delay_days", 2.0))
 
     # Weather — map to ordinal 0/1/2
-    weather_raw = features.get("weather_severity", "clear").lower()
+    weather_raw = str(features.get("weather_severity", "clear")).lower()
     encoded["weather_severity_encoded"] = WEATHER_MAP.get(weather_raw, 0)
 
     # Cargo type — map to int
@@ -99,12 +104,17 @@ def encode_features(features: dict, encoders: dict) -> dict:
         ("destination_port_encoded", "destination_port"),
         ("carrier_encoded",          "carrier"),
     ]:
-        raw_val = features.get(raw_key, "unknown")
+        raw_val = str(features.get(raw_key, "unknown")).strip()
         encoder = active_encoders.get(col)
+        # Normalize port names like "Shanghai, CN" or "Mumbai (Nhava Sheva), IN" -> "Shanghai", "Mumbai"
+        clean_val = raw_val.split(",")[0].split("(")[0].strip()
+
         if encoder and raw_val in encoder:
             encoded[col] = encoder[raw_val]
+        elif encoder and clean_val in encoder:
+            encoded[col] = encoder[clean_val]
         else:
             # Fallback: stable hash so same string → same int
-            encoded[col] = abs(hash(raw_val)) % 100
+            encoded[col] = abs(hash(clean_val)) % 100
 
     return encoded

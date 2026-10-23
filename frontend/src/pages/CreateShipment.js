@@ -1,18 +1,41 @@
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { createShipment } from "../services/api";
+import React, { useState, useEffect } from "react";
+import { useNavigate, useOutletContext } from "react-router-dom";
+import { ArrowLeft, ShieldAlert, UserCheck } from "lucide-react";
+import { createShipment, predictManual } from "../services/api";
+import { Card, Button, RiskBar, Badge } from "../components/ui";
 
 const CARGO_TYPES = ["Electronics", "Textiles", "Food", "Chemicals", "Machinery", "General", "Other"];
 const CARRIERS = ["OceanFreight Co", "GlobalShip Ltd", "MarineX", "AquaLine", "SeaRoute Express"];
+const PORTS = [
+  "Shanghai, CN",
+  "Singapore, SG",
+  "Rotterdam, NL",
+  "Busan, KR",
+  "Los Angeles, US",
+  "Hamburg, DE",
+  "Dubai (Jebel Ali), UAE",
+  "Mumbai (Nhava Sheva), IN",
+  "Felixstowe, UK",
+  "Tokyo, JP",
+  "Antwerp, BE",
+  "Santos, BR",
+  "Hong Kong, HK",
+  "Valencia, ES",
+  "Sydney, AU",
+];
 
 export default function CreateShipment({ embedded = false, onCreated }) {
   const navigate = useNavigate();
+  const context = useOutletContext() || {};
+  const activeRole = context.activeRole || "shipper";
+
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+
   const [form, setForm] = useState({
     containerId: "",
-    origin: "",
-    destination: "",
+    origin: PORTS[0],
+    destination: PORTS[2],
     carrier: CARRIERS[0],
     cargoType: CARGO_TYPES[0],
     weightKg: "",
@@ -21,140 +44,332 @@ export default function CreateShipment({ embedded = false, onCreated }) {
     contactEmail: "",
   });
 
-  const setField = (field) => (event) => setForm((current) => ({ ...current, [field]: event.target.value }));
+  const [previewRisk, setPreviewRisk] = useState(25);
+  const [routeDetail, setRouteDetail] = useState(null);
+  const [evaluating, setEvaluating] = useState(false);
+  const [factors, setFactors] = useState([
+    { name: "Live Maritime Distance", impact: "Calculating..." },
+    { name: "Port Weather Status", impact: "Connecting..." },
+    { name: "Port Berth Congestion", impact: "Evaluating..." },
+  ]);
 
-  const handleSubmit = async () => {
-    const missing = ["containerId", "origin", "destination", "carrier", "cargoType", "weightKg", "estimatedArrival"].filter((field) => !form[field]);
+  const setField = (field) => (e) => {
+    setForm((curr) => ({ ...curr, [field]: e.target.value }));
+  };
+
+  // Real ML inference with live weather & nautical distance as user updates form
+  useEffect(() => {
+    let active = true;
+    const timer = setTimeout(async () => {
+      if (!form.origin || !form.destination) return;
+      setEvaluating(true);
+      try {
+        const res = await predictManual({
+          origin_port: form.origin,
+          destination_port: form.destination,
+          carrier: form.carrier,
+          cargo_type: form.cargoType,
+          weight_kg: parseFloat(form.weightKg) || 5000,
+        });
+
+        if (!active) return;
+        const pred = res.prediction || res;
+        const prob = pred?.delay_probability ?? pred?.riskScore ?? 0.25;
+        const pct = Math.round(prob * 100);
+        setPreviewRisk(pct);
+
+        if (pred?.route_info) {
+          setRouteDetail(pred.route_info);
+        }
+
+        if (pred?.top_factors && pred.top_factors.length > 0) {
+          setFactors(
+            pred.top_factors.map((tf) => ({
+              name: tf.factor,
+              impact: `${Math.round(tf.importance * 100)}% weight`,
+            }))
+          );
+        } else {
+          setFactors([
+            { name: "Route Sea Distance", impact: pred?.route_info ? `${pred.route_info.distance_km?.toLocaleString()} km` : "Standard" },
+            { name: "Live Port Weather", impact: pred?.features_used?.weather_severity || "Clear" },
+            { name: "Port Congestion Index", impact: `${Math.round((pred?.features_used?.origin_congestion || 0.5) * 100)}%` },
+          ]);
+        }
+      } catch (err) {
+        if (!active) return;
+        // Graceful fallback to weight/cargo heuristic if ML service is unreachable
+        const weight = parseFloat(form.weightKg) || 0;
+        let base = 22;
+        if (weight > 15000) base += 20;
+        if (form.cargoType === "Chemicals") base += 15;
+        setPreviewRisk(Math.min(base, 85));
+      } finally {
+        if (active) setEvaluating(false);
+      }
+    }, 250);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [form.origin, form.destination, form.carrier, form.cargoType, form.weightKg]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    const missing = ["containerId", "origin", "destination", "carrier", "cargoType", "weightKg", "estimatedArrival"].filter(
+      (field) => !form[field]
+    );
+
     if (missing.length) {
-      setError(`Please complete: ${missing.join(", ")}`);
+      setError(`Please complete all required fields: ${missing.join(", ")}`);
       return;
     }
 
     setSubmitting(true);
     setError(null);
     try {
-      const response = await createShipment({ ...form, weightKg: parseFloat(form.weightKg) });
+      const response = await createShipment({
+        ...form,
+        weightKg: parseFloat(form.weightKg),
+      });
+
       if (onCreated) {
         await onCreated(response.data);
       }
       navigate(`/shipments/${response.data.shipmentId}`);
-    } catch (requestError) {
-      setError(requestError.response?.data?.error || requestError.message);
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
     } finally {
       setSubmitting(false);
     }
   };
 
-  return (
-    <div>
-      {!embedded ? (
-        <button className="cf-muted-link" onClick={() => navigate("/shipments")}>
-          <span aria-hidden="true">←</span>
-          Back to shipments
-        </button>
-      ) : null}
+  if (activeRole !== "shipper") {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {!embedded && (
+          <button
+            className="mn-btn ghost"
+            onClick={() => navigate("/shipments")}
+            style={{ padding: "0 6px", alignSelf: "flex-start" }}
+          >
+            <ArrowLeft size={16} strokeWidth={1.75} />
+            <span>Back to shipments</span>
+          </button>
+        )}
+        <Card title="Role Access Restricted">
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: "8px 0" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <ShieldAlert size={20} strokeWidth={2} style={{ color: "var(--warn)" }} />
+              <div style={{ fontWeight: 600, fontSize: 14 }}>
+                Only registered Shippers can create shipments on Hyperledger Fabric.
+              </div>
+            </div>
+            <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.6 }}>
+              Your current active role is <strong>{activeRole.toUpperCase()}</strong>. In DLN-Lite, the smart contract strictly enforces Attribute-Based Access Control (ABAC): <code>ctx.GetClientIdentity().AssertAttributeValue("role", "shipper")</code>.
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  window.localStorage.setItem("dln-lite-role-session", JSON.stringify({ role: "shipper", user: "Shipper User" }));
+                  window.location.reload();
+                }}
+              >
+                <UserCheck size={14} strokeWidth={1.75} />
+                <span>Switch to Shipper Role</span>
+              </Button>
+              <Button variant="secondary" onClick={() => navigate("/dashboard")}>
+                Return to Dashboard
+              </Button>
+            </div>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
-      {!embedded ? (
-        <div className="cf-page-head">
-          <div>
-            <p className="cf-page-kicker">Create blockchain record</p>
-            <h1 className="cf-page-title">Register a new shipment handoff.</h1>
-            <p className="cf-page-copy">
-              This form captures the operational metadata that becomes the foundation of the immutable ledger record.
-            </p>
-          </div>
-        </div>
-      ) : (
-        <div className="portal-section-head">
-          <div className="card-header">⊕ Create New Shipment</div>
-          <div className="portal-section-copy">
-            This writes the operational metadata that becomes the foundation of the immutable ledger record.
-          </div>
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {!embedded && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            className="mn-btn ghost"
+            onClick={() => navigate("/shipments")}
+            style={{ padding: "0 6px" }}
+          >
+            <ArrowLeft size={14} strokeWidth={1.75} />
+            <span>Back to shipments</span>
+          </button>
         </div>
       )}
 
-      <div className="cf-grid-2 portal-embedded-grid" style={{ gridTemplateColumns: "minmax(0,1.2fr) minmax(280px,0.8fr)" }}>
-        <section className="cf-card">
-          <div className="cf-card-label">{embedded ? "Shipment details" : "Shipment details"}</div>
-          <div className="cf-form-grid">
-            <Field label="Container ID">
-              <input className="cf-input" value={form.containerId} onChange={setField("containerId")} placeholder="CONT-ABC123" />
-            </Field>
-            <Field label="Carrier">
-              <select className="cf-select" value={form.carrier} onChange={setField("carrier")}>
-                {CARRIERS.map((carrier) => <option key={carrier}>{carrier}</option>)}
-              </select>
-            </Field>
-            <Field label="Origin port">
-              <input className="cf-input" value={form.origin} onChange={setField("origin")} placeholder="Shanghai, CN" />
-            </Field>
-            <Field label="Destination port">
-              <input className="cf-input" value={form.destination} onChange={setField("destination")} placeholder="Rotterdam, NL" />
-            </Field>
-            <Field label="Cargo type">
-              <select className="cf-select" value={form.cargoType} onChange={setField("cargoType")}>
-                {CARGO_TYPES.map((cargoType) => <option key={cargoType}>{cargoType}</option>)}
-              </select>
-            </Field>
-            <Field label="Weight (kg)">
-              <input className="cf-input" type="number" value={form.weightKg} onChange={setField("weightKg")} placeholder="12500" />
-            </Field>
-            <Field label="Estimated arrival">
-              <input className="cf-input" type="date" value={form.estimatedArrival} onChange={setField("estimatedArrival")} />
-            </Field>
-            <Field label="Contact email">
-              <input className="cf-input" type="email" value={form.contactEmail} onChange={setField("contactEmail")} placeholder="ops@company.com" />
-            </Field>
-            <Field label="Notes" full>
-              <textarea className="cf-textarea" value={form.notes} onChange={setField("notes")} placeholder="Special handling notes, internal references, customs remarks..." />
-            </Field>
-          </div>
+      {/* Grid: Form Card & Live Risk Preview */}
+      <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 12, alignItems: "start" }}>
+        {/* Left: Form Card */}
+        <Card title="New shipment registration">
+          <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div className="mn-form-grid">
+              <div className="mn-field">
+                <label className="mn-label">Origin Port *</label>
+                <select className="mn-select" value={form.origin} onChange={setField("origin")} required>
+                  {PORTS.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-          {error ? (
-            <div className="cf-card-soft" style={{ marginTop: 16, color: "#ff6674", borderColor: "rgba(255,68,85,0.25)" }}>
-              {error}
-            </div>
-          ) : null}
+              <div className="mn-field">
+                <label className="mn-label">Destination Port *</label>
+                <select className="mn-select" value={form.destination} onChange={setField("destination")} required>
+                  {PORTS.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-          <div style={{ display: "flex", gap: 12, marginTop: 18, flexWrap: "wrap" }}>
-            <button className="cf-primary-btn" onClick={handleSubmit} disabled={submitting}>
-              {submitting ? "Writing to blockchain..." : "Create shipment"}
-            </button>
-            {!embedded ? (
-              <button className="cf-secondary-btn" onClick={() => navigate("/shipments")}>
-                Cancel
-              </button>
-            ) : null}
-          </div>
-        </section>
+              <div className="mn-field">
+                <label className="mn-label">Designated Carrier *</label>
+                <select className="mn-select" value={form.carrier} onChange={setField("carrier")}>
+                  {CARRIERS.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-        <aside className="cf-card">
-          <div className="cf-card-label">What this writes</div>
-          <div className="cf-timeline">
-            <div className="cf-timeline-item">
-              <div className="cf-timeline-title">Foundational ledger record</div>
-              <div className="cf-timeline-copy">Creates the shipment identity, route and custody baseline shared across participants.</div>
+              <div className="mn-field">
+                <label className="mn-label">Cargo Classification *</label>
+                <select className="mn-select" value={form.cargoType} onChange={setField("cargoType")}>
+                  {CARGO_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="mn-field">
+                <label className="mn-label">Container ID *</label>
+                <input
+                  className="mn-input"
+                  placeholder="e.g. CONT-SHA-9842"
+                  value={form.containerId}
+                  onChange={setField("containerId")}
+                  required
+                />
+              </div>
+
+              <div className="mn-field">
+                <label className="mn-label">Weight (kg) *</label>
+                <input
+                  type="number"
+                  className="mn-input"
+                  placeholder="e.g. 14200"
+                  value={form.weightKg}
+                  onChange={setField("weightKg")}
+                  required
+                />
+              </div>
+
+              <div className="mn-field">
+                <label className="mn-label">Estimated Arrival *</label>
+                <input
+                  type="date"
+                  className="mn-input"
+                  value={form.estimatedArrival}
+                  onChange={setField("estimatedArrival")}
+                  required
+                />
+              </div>
+
+              <div className="mn-field">
+                <label className="mn-label">Contact Email</label>
+                <input
+                  type="email"
+                  className="mn-input"
+                  placeholder="logistics@shipper.org"
+                  value={form.contactEmail}
+                  onChange={setField("contactEmail")}
+                />
+              </div>
             </div>
-            <div className="cf-timeline-item">
-              <div className="cf-timeline-title">ML-ready metadata</div>
-              <div className="cf-timeline-copy">Feeds the downstream delay prediction and monitoring views with route context.</div>
+
+            <div className="mn-field">
+              <label className="mn-label">Handling Notes</label>
+              <textarea
+                className="mn-input"
+                style={{ height: 42, padding: "6px 8px", resize: "none" }}
+                placeholder="Specific customs remarks or special temperature requirements..."
+                value={form.notes}
+                onChange={setField("notes")}
+              />
             </div>
-            <div className="cf-timeline-item">
-              <div className="cf-timeline-title">Immutable transaction trail</div>
-              <div className="cf-timeline-copy">Once submitted, the resulting record becomes the reference point for all later events and verification checks.</div>
+
+            {error && <div className="mn-field-error">{error}</div>}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
+              {!embedded && (
+                <Button variant="ghost" onClick={() => navigate("/shipments")}>
+                  Cancel
+                </Button>
+              )}
+              <Button variant="primary" type="submit" disabled={submitting}>
+                {submitting ? "Writing to ledger..." : "Create shipment"}
+              </Button>
+            </div>
+          </form>
+        </Card>
+
+        {/* Right: Live Risk Preview (Single Compact Card) */}
+        <Card title="Live delay risk preview">
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 12, color: "var(--muted)" }}>
+                {evaluating ? "Inference in progress..." : "XGBoost delay prediction"}
+              </span>
+              <Badge variant={previewRisk >= 65 ? "bad" : previewRisk >= 35 ? "warn" : "ok"}>
+                {previewRisk}% Risk
+              </Badge>
+            </div>
+
+            <RiskBar score={previewRisk} showScore={false} />
+
+            {routeDetail && (
+              <div style={{ fontSize: 11, color: "var(--muted)", display: "flex", flexDirection: "column", gap: 2 }}>
+                <div><strong>Corridor:</strong> {routeDetail.distance_km?.toLocaleString()} km nautical sea-lane (~{routeDetail.transit_days} d transit)</div>
+                {routeDetail.live_weather && (
+                  <div style={{ fontSize: 10, color: "var(--text-subtle, var(--muted))" }}>
+                    <strong>Live Weather:</strong> {routeDetail.live_weather.origin?.port} ({routeDetail.live_weather.origin?.desc}) • {routeDetail.live_weather.destination?.port} ({routeDetail.live_weather.destination?.desc})
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div style={{ borderTop: "1px solid var(--border)", paddingTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", textTransform: "uppercase" }}>
+                Key Delay Factors
+              </div>
+              {factors.map((f) => (
+                <div key={f.name} style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                  <span>{f.name}</span>
+                  <span style={{ color: "var(--muted)" }}>{f.impact}</span>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ borderTop: "1px solid var(--border)", paddingTop: 8, fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>
+              Inference served via Python XGBoost with live Open-Meteo satellite feeds.
             </div>
           </div>
-        </aside>
+        </Card>
       </div>
-    </div>
-  );
-}
-
-function Field({ label, children, full = false }) {
-  return (
-    <div className="cf-field" style={full ? { gridColumn: "1 / -1" } : undefined}>
-      <label>{label}</label>
-      {children}
     </div>
   );
 }

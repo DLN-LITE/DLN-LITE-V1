@@ -64,6 +64,9 @@ export const getRiskDistribution = () =>
 export const getTopRoutes = () =>
   api.get("/analytics/top-routes").then((r) => r.data);
 
+export const getDisruptions = () =>
+  api.get("/analytics/disruptions").then((r) => r.data);
+
 // ── Health ─────────────────────────────────────────────────────────────────
 
 export const getHealth = () =>
@@ -73,7 +76,7 @@ export default api;
 
 // ── Status update & Immutability ────────────────────────────────────────────
 export const updateStatus = (id, status, reason) =>
-  api.put(`/shipments/${id}/status`, { status, reason }).then(r => r.data);
+  api.put(`/shipments/${id}/status`, { status, reason }).then((r) => r.data);
 
 export const verifyIntegrity = (id, claimedData) =>
-  api.post(`/shipments/${id}/verify`, { claimedData }).then(r => r.data);
+  api.post(`/shipments/${id}/verify`, { claimedData }).then((r) => r.data);
